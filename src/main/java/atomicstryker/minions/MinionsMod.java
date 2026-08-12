@@ -4,6 +4,7 @@ import atomicstryker.minions.common.MinionsConfig;
 import atomicstryker.minions.network.MinionsNetwork;
 import atomicstryker.minions.registry.MinionsEntities;
 import atomicstryker.minions.registry.MinionsItems;
+import atomicstryker.minions.registry.MinionsSounds;
 import com.mojang.logging.LogUtils;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.neoforged.bus.api.IEventBus;
@@ -21,6 +22,7 @@ public final class MinionsMod {
     public MinionsMod(IEventBus modEventBus, ModContainer modContainer) {
         MinionsItems.ITEMS.register(modEventBus);
         MinionsEntities.ENTITY_TYPES.register(modEventBus);
+        MinionsSounds.SOUND_EVENTS.register(modEventBus);
         modEventBus.addListener(MinionsEntities::registerAttributes);
         modEventBus.addListener(MinionsNetwork::registerPayloads);
         modEventBus.addListener(this::addCreativeTabItems);

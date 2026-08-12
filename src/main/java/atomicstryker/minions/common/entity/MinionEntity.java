@@ -1,6 +1,7 @@
 package atomicstryker.minions.common.entity;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -9,6 +10,7 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
+import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -349,6 +351,15 @@ public final class MinionEntity extends PathfinderMob {
         if (returnContainer != null) {
             tag.putLong("returnContainer", returnContainer.asLong());
         }
+
+        NonNullList<ItemStack> savedItems = NonNullList.withSize(inventory.getContainerSize(), ItemStack.EMPTY);
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            savedItems.set(slot, inventory.getItem(slot));
+        }
+        CompoundTag inventoryTag = new CompoundTag();
+        ContainerHelper.saveAllItems(inventoryTag, savedItems, level().registryAccess());
+        tag.put("MinionInventory", inventoryTag);
+        tag.putLongArray("workQueue", workQueue.stream().mapToLong(BlockPos::asLong).toArray());
     }
 
     @Override
@@ -363,6 +374,19 @@ public final class MinionEntity extends PathfinderMob {
         followingMaster = tag.getBoolean("followingMaster");
         moveTarget = tag.contains("moveTarget") ? BlockPos.of(tag.getLong("moveTarget")) : null;
         returnContainer = tag.contains("returnContainer") ? BlockPos.of(tag.getLong("returnContainer")) : null;
+
+        if (tag.contains("MinionInventory")) {
+            NonNullList<ItemStack> savedItems = NonNullList.withSize(inventory.getContainerSize(), ItemStack.EMPTY);
+            ContainerHelper.loadAllItems(tag.getCompound("MinionInventory"), savedItems, level().registryAccess());
+            for (int slot = 0; slot < savedItems.size(); slot++) {
+                inventory.setItem(slot, savedItems.get(slot));
+            }
+        }
+        workQueue.clear();
+        for (long packed : tag.getLongArray("workQueue")) {
+            workQueue.add(BlockPos.of(packed));
+        }
+        entityData.set(WORKING, !workQueue.isEmpty());
     }
 
     @Override

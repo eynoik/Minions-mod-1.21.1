@@ -5,17 +5,21 @@
 - [x] Replace ForgeGradle 1.12.2 build with NeoForge 1.21.1 ModDevGradle
 - [x] Move to Java 21
 - [x] Replace old `@Mod` lifecycle with NeoForge mod constructor/event bus
+- [x] Add GitHub Actions build validation and JAR artifact
 
 ## Content
 - [x] Register Master's Staff through `DeferredRegister`
 - [ ] Restore Master's Staff use/charge behavior
-- [ ] Register Minion entity type
-- [ ] Port Minion attributes and synced entity data
-- [ ] Port Minion renderer/model
+- [x] Register Minion entity type
+- [x] Port base Minion attributes
+- [x] Port synced owner-name data and legacy `masterUsername` NBT key
+- [x] Add temporary client renderer using the original texture
+- [ ] Port the original Minion model geometry/animations
 
 ## Systems
 - [ ] Replace old custom packet system with NeoForge payload networking
-- [ ] Port player/minion ownership persistence
+- [ ] Port full player/minion ownership lookup and persistence
+- [ ] Port Minion inventory
 - [ ] Port job manager and block tasks
 - [ ] Port A* pathfinding integration
 - [ ] Port tree scanning and mining logic to modern block/tag APIs
@@ -23,7 +27,7 @@
 - [ ] Rework forced chunk loading for modern NeoForge
 
 ## Client
-- [ ] Replace `@SidedProxy` client split
+- [x] Replace the old `@SidedProxy` bootstrap split with client event subscribers
 - [ ] Port key/input handling
 - [ ] Port Minion/Deed/Custom Dig GUIs
 - [ ] Port selection-region rendering

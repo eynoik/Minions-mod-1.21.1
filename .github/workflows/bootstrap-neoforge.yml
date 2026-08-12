@@ -1,0 +1,284 @@
+name: Bootstrap NeoForge 1.21.1
+
+on:
+  push:
+    branches:
+      - agent/neoforge-1.21.1-bootstrap
+    paths:
+      - .github/workflows/bootstrap-neoforge.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/neoforge-1.21.1-bootstrap
+          fetch-depth: 0
+
+      - name: Preserve Forge 1.12.2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p legacy/1.12.2
+          for entry in .classpath .project build.bat build.gradle src; do
+            if [ -e "$entry" ]; then
+              rm -rf "legacy/1.12.2/$entry"
+              mv "$entry" legacy/1.12.2/
+            fi
+          done
+
+      - name: Install official NeoForge 1.21.1 MDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/minions-mdk /tmp/minions-mdk.zip
+          curl -L --fail --retry 3 \
+            https://github.com/NeoForgeMDKs/MDK-1.21.1-ModDevGradle/archive/refs/heads/main.zip \
+            -o /tmp/minions-mdk.zip
+          mkdir /tmp/minions-mdk
+          unzip -q /tmp/minions-mdk.zip -d /tmp/minions-mdk
+          MDK="$(find /tmp/minions-mdk -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          cp "$MDK/build.gradle" .
+          cp "$MDK/settings.gradle" .
+          cp "$MDK/gradlew" .
+          cp "$MDK/gradlew.bat" .
+          cp "$MDK/.gitattributes" . || true
+          cp "$MDK/.gitignore" .
+          cp -a "$MDK/gradle" .
+          chmod +x gradlew
+
+      - name: Configure Minions port
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2G
+          org.gradle.daemon=true
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.configuration-cache=true
+
+          parchment_minecraft_version=1.21.1
+          parchment_mappings_version=2024.11.17
+          minecraft_version=1.21.1
+          minecraft_version_range=[1.21.1]
+          neo_version=21.1.244
+          loader_version_range=[1,)
+
+          mod_id=minions
+          mod_name=Minions
+          mod_license=All Rights Reserved
+          mod_version=2.0.3-1.21.1-alpha.1
+          mod_group_id=atomicstryker.minions
+          EOF
+
+          mkdir -p src/main/java/atomicstryker/minions/common/item
+          mkdir -p src/main/java/atomicstryker/minions/registry
+          mkdir -p src/main/resources/assets/minions
+          mkdir -p src/main/templates/META-INF
+
+          cat > src/main/java/atomicstryker/minions/MinionsMod.java <<'EOF'
+          package atomicstryker.minions;
+
+          import atomicstryker.minions.registry.MinionsItems;
+          import com.mojang.logging.LogUtils;
+          import net.neoforged.bus.api.IEventBus;
+          import net.neoforged.fml.common.Mod;
+          import org.slf4j.Logger;
+
+          @Mod(MinionsMod.MOD_ID)
+          public final class MinionsMod {
+              public static final String MOD_ID = "minions";
+              public static final Logger LOGGER = LogUtils.getLogger();
+
+              public MinionsMod(IEventBus modEventBus) {
+                  MinionsItems.ITEMS.register(modEventBus);
+                  LOGGER.info("Minions NeoForge 1.21.1 port bootstrap loaded");
+              }
+          }
+          EOF
+
+          cat > src/main/java/atomicstryker/minions/registry/MinionsItems.java <<'EOF'
+          package atomicstryker.minions.registry;
+
+          import atomicstryker.minions.MinionsMod;
+          import atomicstryker.minions.common.item.MastersStaffItem;
+          import net.neoforged.neoforge.registries.DeferredItem;
+          import net.neoforged.neoforge.registries.DeferredRegister;
+
+          public final class MinionsItems {
+              public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MinionsMod.MOD_ID);
+
+              public static final DeferredItem<MastersStaffItem> MASTER_STAFF = ITEMS.register(
+                      "masterstaff",
+                      MastersStaffItem::new
+              );
+
+              private MinionsItems() {
+              }
+          }
+          EOF
+
+          cat > src/main/java/atomicstryker/minions/common/item/MastersStaffItem.java <<'EOF'
+          package atomicstryker.minions.common.item;
+
+          import net.minecraft.world.item.Item;
+
+          /**
+           * 1.21.1 port bootstrap of the original ItemMastersStaff.
+           * Command behavior will be restored after the networking/client input layer is ported.
+           */
+          public final class MastersStaffItem extends Item {
+              public MastersStaffItem() {
+                  super(new Item.Properties().stacksTo(1));
+              }
+          }
+          EOF
+
+          cat > src/main/templates/META-INF/neoforge.mods.toml <<'EOF'
+          modLoader="javafml"
+          loaderVersion="${loader_version_range}"
+          license="${mod_license}"
+
+          [[mods]]
+          modId="${mod_id}"
+          version="${mod_version}"
+          displayName="${mod_name}"
+          authors="AtomicStryker; NeoForge 1.21.1 port"
+          description='''
+          NeoForge 1.21.1 port of AtomicStryker's Minions mod.
+          This repository keeps the extracted Forge 1.12.2 source under legacy/1.12.2 as the porting reference.
+          '''
+
+          [[dependencies.${mod_id}]]
+          modId="neoforge"
+          type="required"
+          versionRange="[${neo_version},)"
+          ordering="NONE"
+          side="BOTH"
+
+          [[dependencies.${mod_id}]]
+          modId="minecraft"
+          type="required"
+          versionRange="${minecraft_version_range}"
+          ordering="NONE"
+          side="BOTH"
+          EOF
+
+          if [ -d legacy/1.12.2/src/main/resources/assets/minions ]; then
+            cp -a legacy/1.12.2/src/main/resources/assets/minions src/main/resources/assets/
+          fi
+
+          mkdir -p src/main/resources/assets/minions/textures/item
+          if [ -f src/main/resources/assets/minions/textures/items/masterstaff.png ]; then
+            cp src/main/resources/assets/minions/textures/items/masterstaff.png \
+               src/main/resources/assets/minions/textures/item/masterstaff.png
+          fi
+
+          mkdir -p src/main/resources/assets/minions/models/item
+          cat > src/main/resources/assets/minions/models/item/masterstaff.json <<'EOF'
+          {
+            "parent": "minecraft:item/handheld",
+            "textures": {
+              "layer0": "minions:item/masterstaff"
+            }
+          }
+          EOF
+
+          mkdir -p src/main/resources/assets/minions/lang
+          cat > src/main/resources/assets/minions/lang/en_us.json <<'EOF'
+          {
+            "item.minions.masterstaff": "Master's Staff"
+          }
+          EOF
+
+          cat > README.md <<'EOF'
+          # Minions — NeoForge 1.21.1 port
+
+          Active port of AtomicStryker's Minions mod from Forge 1.12.2 to NeoForge 1.21.1.
+
+          ## Repository layout
+
+          - `src/main/` — active NeoForge 1.21.1 implementation
+          - `legacy/1.12.2/` — exact extracted Forge 1.12.2 project used as the porting reference
+
+          ## Port status
+
+          Implemented:
+          - NeoForge 1.21.1 / Java 21 Gradle project
+          - `minions` mod entry point
+          - modern deferred item registration
+          - Master's Staff registration, model, texture and English name
+          - original assets retained for incremental migration
+
+          Next:
+          - Minion entity registration + attributes
+          - entity data/ownership and save data
+          - renderer/model port
+          - networking migration to NeoForge payloads
+          - AI/job manager and A* migration
+          - Master's Staff command behavior and GUIs
+          - configuration and chunk-loading behavior
+
+          Build with:
+
+          ```bash
+          ./gradlew build
+          ```
+          EOF
+
+          cat > PORTING.md <<'EOF'
+          # Porting tracker — Forge 1.12.2 -> NeoForge 1.21.1
+
+          ## Foundation
+          - [x] Preserve original 1.12.2 project in `legacy/1.12.2`
+          - [x] Replace ForgeGradle 1.12.2 build with NeoForge 1.21.1 ModDevGradle
+          - [x] Move to Java 21
+          - [x] Replace old `@Mod` lifecycle with NeoForge mod constructor/event bus
+
+          ## Content
+          - [x] Register Master's Staff through `DeferredRegister`
+          - [ ] Restore Master's Staff use/charge behavior
+          - [ ] Register Minion entity type
+          - [ ] Port Minion attributes and synced entity data
+          - [ ] Port Minion renderer/model
+
+          ## Systems
+          - [ ] Replace old custom packet system with NeoForge payload networking
+          - [ ] Port player/minion ownership persistence
+          - [ ] Port job manager and block tasks
+          - [ ] Port A* pathfinding integration
+          - [ ] Port tree scanning and mining logic to modern block/tag APIs
+          - [ ] Replace old Forge config system
+          - [ ] Rework forced chunk loading for modern NeoForge
+
+          ## Client
+          - [ ] Replace `@SidedProxy` client split
+          - [ ] Port key/input handling
+          - [ ] Port Minion/Deed/Custom Dig GUIs
+          - [ ] Port selection-region rendering
+          - [ ] Port custom lightning renderer
+          EOF
+
+      - name: Commit bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'Bootstrap NeoForge 1.21.1 port [skip ci]'
+            git push origin HEAD:agent/neoforge-1.21.1-bootstrap
+          fi
+
+      - name: Build
+        shell: bash
+        run: ./gradlew build --stacktrace

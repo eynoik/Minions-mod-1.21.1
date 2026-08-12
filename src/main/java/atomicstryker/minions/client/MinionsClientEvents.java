@@ -2,6 +2,7 @@ package atomicstryker.minions.client;
 
 import atomicstryker.minions.MinionsMod;
 import atomicstryker.minions.client.gui.MinionsScreen;
+import atomicstryker.minions.client.model.MinionModel;
 import atomicstryker.minions.client.render.MinionRenderer;
 import atomicstryker.minions.registry.MinionsEntities;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -23,6 +24,11 @@ public final class MinionsClientEvents {
             GLFW.GLFW_KEY_M,
             "key.categories.minions"
     );
+
+    @SubscribeEvent
+    public static void registerLayers(EntityRenderersEvent.RegisterLayerDefinitions event) {
+        event.registerLayerDefinition(MinionModel.LAYER, MinionModel::createBodyLayer);
+    }
 
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {

@@ -10,7 +10,7 @@ Playable NeoForge 1.21.1 port of AtomicStryker's Minions mod from Forge 1.12.2.
 
 ## Current version
 
-`2.0.3-1.21.1-beta.2`
+`2.0.3-1.21.1-beta.3`
 
 ## Implemented
 
@@ -19,7 +19,7 @@ Playable NeoForge 1.21.1 port of AtomicStryker's Minions mod from Forge 1.12.2.
 - configurable Minions-per-player and food costs
 - summon, move, follow and unsummon
 - original Minion-style sounds for spawning, orders, tree work, pickup, staff bolt and ambient squeaks
-- tree harvesting and vein mining
+- legacy-style tree harvesting (up to 16 nearby trees / 64-block scan) and vein mining
 - legacy-style 5x5 spiral-stair mineshaft
 - independent 1x2 strip mines: each repeated order can assign another idle Minion its own strip
 - strip-mine floor repair, ore/valuable-wall scanning and periodic torches

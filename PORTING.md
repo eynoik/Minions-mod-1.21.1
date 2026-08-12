@@ -2,33 +2,50 @@
 
 ## Foundation
 - [x] Preserve original 1.12.2 project in `legacy/1.12.2`
-- [x] Replace ForgeGradle 1.12.2 build with NeoForge 1.21.1 ModDevGradle
-- [x] Move to Java 21
-- [x] Replace old `@Mod` lifecycle with NeoForge mod constructor/event bus
-- [x] Add GitHub Actions build validation and JAR artifact
+- [x] NeoForge 1.21.1 ModDevGradle project
+- [x] Java 21
+- [x] Modern mod lifecycle/event bus
+- [x] GitHub Actions build validation and JAR artifact
 
-## Content
-- [x] Register Master's Staff through `DeferredRegister`
-- [ ] Restore Master's Staff use/charge behavior
-- [x] Register Minion entity type
-- [x] Port base Minion attributes
-- [x] Port synced owner-name data and legacy `masterUsername` NBT key
-- [x] Add temporary client renderer using the original texture
-- [ ] Port the original Minion model geometry/animations
+## Gameplay/content
+- [x] Master's Staff registration, original texture and use/charge behavior
+- [x] Minion EntityType, attributes and owner persistence
+- [x] Original Minion-style model geometry and texture
+- [x] Summon up to configurable per-player limit
+- [x] Move and follow orders
+- [x] Unsummon
+- [x] Tree harvesting
+- [x] Ore/block vein mining
+- [x] Mineshaft digging
+- [x] Strip mining
+- [x] Custom-area digging
+- [x] Item pickup and 24-slot Minion inventory
+- [x] Return/deposit items into inventories
+- [x] Pick up/carry living entities
+- [x] Drop passenger/items command
+- [x] Evil-deed XP progression and Master's Staff reward
+- [x] Staff lightning attack
+- [x] Polish and English 1.21.1 translations
 
-## Systems
-- [ ] Replace old custom packet system with NeoForge payload networking
-- [ ] Port full player/minion ownership lookup and persistence
-- [ ] Port Minion inventory
-- [ ] Port job manager and block tasks
-- [ ] Port A* pathfinding integration
-- [ ] Port tree scanning and mining logic to modern block/tag APIs
-- [ ] Replace old Forge config system
-- [ ] Rework forced chunk loading for modern NeoForge
+## Technical systems
+- [x] Replace legacy packet helper with NeoForge custom payload networking
+- [x] UUID-based player/minion ownership
+- [x] Persist inventory, owner, movement state and queued work in entity NBT
+- [x] Replace old job-manager/block-task graph with per-minion work queues
+- [x] Replace legacy A* implementation with modern vanilla navigation plus stuck recovery
+- [x] Replace old manual tree registry scan with block tags
+- [x] Replace old Forge Configuration API with ModConfigSpec
+- [x] Replace @SidedProxy with client event subscribers
+- [x] Modern key mapping and command screen
 
-## Client
-- [x] Replace the old `@SidedProxy` bootstrap split with client event subscribers
-- [ ] Port key/input handling
-- [ ] Port Minion/Deed/Custom Dig GUIs
-- [ ] Port selection-region rendering
-- [ ] Port custom lightning renderer
+## Deliberate 1.21.1 differences
+These are not blockers for gameplay and are intentionally not copied literally from the 1.12.2 implementation:
+
+- The obsolete custom A* worker is replaced by Minecraft 1.21.1 navigation with teleport recovery when a worker cannot reach a queued block.
+- Permanent Forge chunk tickets are not recreated. Persisting ticking chunk tickets for every worker is a server-footgun; minions resume their persisted queue when their entity chunk is loaded again.
+- The old OpenGL selection-box renderer is replaced by target-at-crosshair commands from the `M` menu.
+- The old CodeChicken-derived fractal lightning renderer is replaced by a modern visual lightning strike plus localized damage/fire around the targeted block.
+- The old free-form `minions_Advanced.cfg` parser is not used by the active port. Modern block tags and `minions-common.toml` are used instead.
+
+## Validation
+`./gradlew build` is run by GitHub Actions after changes. The workflow uploads the built JAR as an artifact.

@@ -110,6 +110,23 @@ public final class MinionManager {
         playOrder(player, MinionsSounds.RANDOM_ORDER.get());
     }
 
+    /**
+     * Restores the old owner-hit work boost as a staff action: all currently
+     * loaded Minions owned by the player work at 2x speed for 30 seconds.
+     */
+    public static boolean boostWork(ServerPlayer player) {
+        List<MinionEntity> minions = getOwned(player);
+        if (minions.isEmpty()) {
+            return false;
+        }
+        for (MinionEntity minion : minions) {
+            minion.applyWorkBoost(20 * 30);
+        }
+        player.serverLevel().playSound(
+                null, player.blockPosition(), MinionsSounds.BOLT.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
+        return true;
+    }
+
     public static void assignReturnContainer(ServerPlayer player, BlockPos target, boolean preserveCurrentJob) {
         if (!(player.serverLevel().getBlockEntity(target) instanceof net.minecraft.world.Container)) {
             return;

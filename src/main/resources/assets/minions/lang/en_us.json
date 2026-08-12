@@ -21,6 +21,8 @@
   "message.minions.chop": "Minions ordered to harvest the tree.",
   "message.minions.mine": "Minions ordered to mine the vein.",
   "message.minions.chest": "Minions will return carried items to this inventory.",
+  "message.minions.pickup": "A minion will pick up the target.",
+  "message.minions.drop": "Minion dropped its passenger and carried items.",
   "message.minions.no_willpower": "You are too hungry to command the minions.",
   "message.minions.deeds_disabled": "Evil deeds are disabled on this server.",
   "message.minions.need_xp": "You need %s experience levels to commit an evil deed.",

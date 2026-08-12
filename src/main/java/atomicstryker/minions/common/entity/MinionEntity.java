@@ -33,6 +33,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayDeque;
 import java.util.List;
@@ -59,6 +60,7 @@ public final class MinionEntity extends PathfinderMob {
     private UUID carryTargetUUID;
     private int stuckTicks;
     private int pickupCooldown;
+    private int pickupDisabledTicks;
 
     public MinionEntity(EntityType<? extends MinionEntity> entityType, Level level) {
         super(entityType, level);
@@ -133,6 +135,10 @@ public final class MinionEntity extends PathfinderMob {
         enqueue(new WorkOrder(pos.immutable(), WorkAction.BREAK, null));
     }
 
+    public void enqueueTreeWork(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.TREE_BREAK, null));
+    }
+
     public void enqueuePlaceCobble(BlockPos pos) {
         enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_COBBLE, null));
     }
@@ -182,13 +188,44 @@ public final class MinionEntity extends PathfinderMob {
     public void dropPassengerAndItems() {
         ejectPassengers();
         carryTargetUUID = null;
+        if (level() instanceof ServerLevel serverLevel) {
+            ServerPlayer owner = getOwner(serverLevel);
+            if (owner != null) {
+                dropStoredItemsToward(owner);
+                return;
+            }
+        }
         dropStoredItems();
+    }
+
+    /** Restores the old DropAll behavior: throw the inventory toward the master. */
+    public void dropStoredItemsToward(ServerPlayer player) {
+        if (level().isClientSide) {
+            return;
+        }
+        pickupDisabledTicks = 60; // legacy blockItemPickUp(): three seconds
+        Vec3 source = position().add(0.0D, getBbHeight() * 0.65D, 0.0D);
+        Vec3 toPlayer = player.getEyePosition().subtract(source);
+        Vec3 velocity = toPlayer.lengthSqr() > 0.0001D
+                ? toPlayer.normalize().scale(0.38D).add(0.0D, 0.12D, 0.0D)
+                : new Vec3(0.0D, 0.18D, 0.0D);
+
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.removeItemNoUpdate(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            ItemEntity item = new ItemEntity(level(), source.x, source.y, source.z, stack);
+            item.setDeltaMovement(velocity);
+            level().addFreshEntity(item);
+        }
     }
 
     public void dropStoredItems() {
         if (level().isClientSide) {
             return;
         }
+        pickupDisabledTicks = 60;
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.removeItemNoUpdate(slot);
             if (!stack.isEmpty()) {
@@ -204,7 +241,9 @@ public final class MinionEntity extends PathfinderMob {
             return;
         }
 
-        if (pickupCooldown-- <= 0) {
+        if (pickupDisabledTicks > 0) {
+            pickupDisabledTicks--;
+        } else if (pickupCooldown-- <= 0) {
             pickupCooldown = 10;
             collectNearbyItems(serverLevel);
         }
@@ -234,7 +273,7 @@ public final class MinionEntity extends PathfinderMob {
 
         BlockPos target = order.pos();
         BlockState state = level.getBlockState(target);
-        if (order.action() == WorkAction.BREAK) {
+        if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
             if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
                 workQueue.poll();
                 return;
@@ -256,11 +295,12 @@ public final class MinionEntity extends PathfinderMob {
         }
 
         double distance = distanceToSqr(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
-        if (distance <= 9.0D) {
+        double workReachSq = order.action() == WorkAction.TREE_BREAK ? 256.0D : 9.0D;
+        if (distance <= workReachSq) {
             navigation.stop();
             swing(net.minecraft.world.InteractionHand.MAIN_HAND);
 
-            if (order.action() == WorkAction.BREAK) {
+            if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
                 level.destroyBlock(target, true, this);
             } else {
                 if (!state.isAir()) {
@@ -292,7 +332,7 @@ public final class MinionEntity extends PathfinderMob {
 
     private BlockState desiredState(WorkOrder order) {
         return switch (order.action()) {
-            case BREAK -> null;
+            case BREAK, TREE_BREAK -> null;
             case PLACE_COBBLE -> Blocks.COBBLESTONE.defaultBlockState();
             case PLACE_DIRT -> Blocks.DIRT.defaultBlockState();
             case PLACE_TORCH -> Blocks.TORCH.defaultBlockState();
@@ -394,7 +434,7 @@ public final class MinionEntity extends PathfinderMob {
     }
 
     private void collectNearbyItems(ServerLevel level) {
-        List<ItemEntity> items = level.getEntitiesOfClass(ItemEntity.class, new AABB(blockPosition()).inflate(1.5D));
+        List<ItemEntity> items = level.getEntitiesOfClass(ItemEntity.class, new AABB(blockPosition()).inflate(4.5D));
         for (ItemEntity itemEntity : items) {
             ItemStack stack = itemEntity.getItem();
             if (stack.isEmpty()) {
@@ -530,7 +570,8 @@ public final class MinionEntity extends PathfinderMob {
         PLACE_COBBLE,
         PLACE_DIRT,
         PLACE_STAIR,
-        PLACE_TORCH
+        PLACE_TORCH,
+        TREE_BREAK
     }
 
     public record WorkOrder(BlockPos pos, WorkAction action, Direction facing) {

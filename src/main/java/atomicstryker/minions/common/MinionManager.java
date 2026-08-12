@@ -143,14 +143,133 @@ public final class MinionManager {
         if (!level.getBlockState(start).is(BlockTags.LOGS)) {
             return false;
         }
-        List<BlockPos> work = floodMatching(level, start, MinionsConfig.MAX_TREE_BLOCKS.get(), true);
-        assignBreakWork(player, work);
-        if (!work.isEmpty()) {
+
+        List<List<BlockPos>> trees = scanNearbyTrees(level, start);
+        assignTreeWork(player, trees);
+        if (!trees.isEmpty()) {
             playOrder(player, MinionsSounds.ORDER_TREE_CUTTING.get());
             exhaustBig(player);
             return true;
         }
         return false;
+    }
+
+    /**
+     * Legacy TreeScanner parity: one clicked tree starts a local harvest job which
+     * searches outward for up to sixteen trees, out to sixty-four blocks.
+     */
+    private static List<List<BlockPos>> scanNearbyTrees(ServerLevel level, BlockPos start) {
+        final int searchRadius = 64;
+        final int maxTrees = 16;
+        final int maxBlocksPerTree = Math.max(64, MinionsConfig.MAX_TREE_BLOCKS.get());
+        List<List<BlockPos>> trees = new ArrayList<>();
+        Set<BlockPos> claimedLogs = new HashSet<>();
+
+        BlockPos clickedBase = start.immutable();
+        while (clickedBase.getY() > level.getMinBuildHeight() && level.getBlockState(clickedBase.below()).is(BlockTags.LOGS)) {
+            clickedBase = clickedBase.below();
+        }
+        tryAddTree(level, clickedBase, maxBlocksPerTree, trees, claimedLogs, maxTrees);
+
+        int centerX = start.getX();
+        int centerZ = start.getZ();
+        for (int radius = 1; radius <= searchRadius && trees.size() < maxTrees; radius++) {
+            for (int dx = -radius; dx <= radius && trees.size() < maxTrees; dx++) {
+                tryAddTreeColumn(level, centerX + dx, centerZ - radius, maxBlocksPerTree, trees, claimedLogs, maxTrees);
+                tryAddTreeColumn(level, centerX + dx, centerZ + radius, maxBlocksPerTree, trees, claimedLogs, maxTrees);
+            }
+            for (int dz = -radius + 1; dz <= radius - 1 && trees.size() < maxTrees; dz++) {
+                tryAddTreeColumn(level, centerX - radius, centerZ + dz, maxBlocksPerTree, trees, claimedLogs, maxTrees);
+                tryAddTreeColumn(level, centerX + radius, centerZ + dz, maxBlocksPerTree, trees, claimedLogs, maxTrees);
+            }
+        }
+        return trees;
+    }
+
+    private static void tryAddTreeColumn(ServerLevel level, int x, int z, int maxBlocksPerTree,
+                                         List<List<BlockPos>> trees, Set<BlockPos> claimedLogs, int maxTrees) {
+        if (trees.size() >= maxTrees) {
+            return;
+        }
+        int topY = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        int bottomY = Math.max(level.getMinBuildHeight(), topY - 48);
+        for (int y = topY; y >= bottomY; y--) {
+            BlockPos pos = new BlockPos(x, y, z);
+            if (!level.getBlockState(pos).is(BlockTags.LOGS)) {
+                continue;
+            }
+            while (pos.getY() > level.getMinBuildHeight() && level.getBlockState(pos.below()).is(BlockTags.LOGS)) {
+                pos = pos.below();
+            }
+            tryAddTree(level, pos, maxBlocksPerTree, trees, claimedLogs, maxTrees);
+            return;
+        }
+    }
+
+    private static void tryAddTree(ServerLevel level, BlockPos base, int maxBlocksPerTree,
+                                   List<List<BlockPos>> trees, Set<BlockPos> claimedLogs, int maxTrees) {
+        if (trees.size() >= maxTrees || claimedLogs.contains(base) || !level.getBlockState(base).is(BlockTags.LOGS)) {
+            return;
+        }
+        List<BlockPos> tree = collectTreeLogs(level, base, maxBlocksPerTree);
+        if (tree.size() <= 3) {
+            return;
+        }
+        claimedLogs.addAll(tree);
+        tree.sort(Comparator.comparingInt(BlockPos::getY));
+        trees.add(tree);
+    }
+
+    private static List<BlockPos> collectTreeLogs(ServerLevel level, BlockPos base, int limit) {
+        Queue<BlockPos> open = new ArrayDeque<>();
+        Set<BlockPos> seen = new HashSet<>();
+        List<BlockPos> logs = new ArrayList<>();
+        open.add(base.immutable());
+
+        while (!open.isEmpty() && logs.size() < limit) {
+            BlockPos pos = open.remove();
+            if (!seen.add(pos) || !level.getBlockState(pos).is(BlockTags.LOGS)) {
+                continue;
+            }
+            logs.add(pos);
+
+            // Match the legacy scanner: same layer plus one layer upward in a 3x3 footprint.
+            // This reaches diagonal branches and wide/modded trunks the beta.2 six-way flood missed.
+            for (int dy = 0; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) {
+                            continue;
+                        }
+                        BlockPos next = pos.offset(dx, dy, dz);
+                        if (!seen.contains(next)) {
+                            open.add(next.immutable());
+                        }
+                    }
+                }
+            }
+        }
+        return logs;
+    }
+
+    private static void assignTreeWork(ServerPlayer player, List<List<BlockPos>> trees) {
+        List<MinionEntity> minions = getOwned(player);
+        if (minions.isEmpty()) {
+            return;
+        }
+        for (MinionEntity minion : minions) {
+            minion.clearWork();
+            minion.setFollowing(false);
+            minion.clearMoveTarget();
+        }
+
+        int workerIndex = 0;
+        for (List<BlockPos> tree : trees) {
+            MinionEntity worker = minions.get(workerIndex++ % minions.size());
+            for (BlockPos log : tree) {
+                worker.enqueueTreeWork(log);
+            }
+        }
     }
 
     public static boolean mineVein(ServerPlayer player, BlockPos start) {

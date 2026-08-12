@@ -1,0 +1,74 @@
+name: Publish beta.10 prerelease
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-beta10.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout beta.10 source
+        uses: actions/checkout@v4
+        with:
+          ref: 9a448add2b14328de8e4d06d6e179bb4ab1b89dd
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build
+        run: ./gradlew build --stacktrace
+
+      - name: Create beta.10 prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: 2.0.3-1.21.1-beta.10
+          RELEASE_TARGET: 9a448add2b14328de8e4d06d6e179bb4ab1b89dd
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="build/libs/minions-2.0.3-1.21.1-beta.10.jar"
+          test -f "$JAR"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to do."
+            exit 0
+          fi
+
+          cat > /tmp/release-notes.md <<'EOF'
+          ## Minions — Minecraft 1.21.1 NeoForge beta.10
+
+          Unofficial, non-commercial NeoForge 1.21.1 port of AtomicStryker's Minecraft Minions.
+
+          **1.21.1 port / fixes / maintenance:** meynoik  
+          **Original mod:** AtomicStryker
+
+          ### beta.10
+
+          - Minion backpack contents now drop into the world when a Minion actually dies
+          - quick right-click with the Master's Staff into open air restores the work/whip boost
+          - boost affects all currently summoned owned Minions for 30 seconds
+          - boosted Minions work at 2x speed, matching the old 1.12.2 workSpeed behavior
+          - activation uses the original bolt sound and has no hunger cost
+          - existing block staff actions, hold-to-follow/unsummon, selection grids and beta.9 durability changes are preserved
+
+          ### Permission / copyright
+
+          This release is non-commercial. Original Minecraft Minions code/assets remain credited to AtomicStryker and are not relicensed by this project. See the repository README for upstream links and AtomicStryker's published copyright/permission statements.
+          EOF
+
+          gh release create "$TAG" "$JAR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_TARGET" \
+            --title "Minions 1.21.1 — beta.10" \
+            --notes-file /tmp/release-notes.md \
+            --prerelease

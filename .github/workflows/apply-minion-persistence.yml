@@ -1,0 +1,46 @@
+name: Apply Minion persistence
+
+on:
+  push:
+    branches: [agent/finish-minions-port]
+    paths:
+      - '.github/workflows/apply-minion-persistence.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-minions-port
+      - name: Patch inventory and work persistence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/main/java/atomicstryker/minions/common/entity/MinionEntity.java')
+          s = p.read_text()
+          s = s.replace('import net.minecraft.core.BlockPos;\n', 'import net.minecraft.core.BlockPos;\nimport net.minecraft.core.NonNullList;\n')
+          s = s.replace('import net.minecraft.world.Container;\n', 'import net.minecraft.world.Container;\nimport net.minecraft.world.ContainerHelper;\n')
+          old = '''        if (returnContainer != null) {\n            tag.putLong("returnContainer", returnContainer.asLong());\n        }\n    }'''
+          new = '''        if (returnContainer != null) {\n            tag.putLong("returnContainer", returnContainer.asLong());\n        }\n\n        NonNullList<ItemStack> savedItems = NonNullList.withSize(inventory.getContainerSize(), ItemStack.EMPTY);\n        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {\n            savedItems.set(slot, inventory.getItem(slot));\n        }\n        CompoundTag inventoryTag = new CompoundTag();\n        ContainerHelper.saveAllItems(inventoryTag, savedItems, level().registryAccess());\n        tag.put("MinionInventory", inventoryTag);\n        tag.putLongArray("workQueue", workQueue.stream().mapToLong(BlockPos::asLong).toArray());\n    }'''
+          if old not in s:
+              raise SystemExit('save marker not found')
+          s = s.replace(old, new)
+          old = '''        returnContainer = tag.contains("returnContainer") ? BlockPos.of(tag.getLong("returnContainer")) : null;\n    }'''
+          new = '''        returnContainer = tag.contains("returnContainer") ? BlockPos.of(tag.getLong("returnContainer")) : null;\n\n        if (tag.contains("MinionInventory")) {\n            NonNullList<ItemStack> savedItems = NonNullList.withSize(inventory.getContainerSize(), ItemStack.EMPTY);\n            ContainerHelper.loadAllItems(tag.getCompound("MinionInventory"), savedItems, level().registryAccess());\n            for (int slot = 0; slot < savedItems.size(); slot++) {\n                inventory.setItem(slot, savedItems.get(slot));\n            }\n        }\n        workQueue.clear();\n        for (long packed : tag.getLongArray("workQueue")) {\n            workQueue.add(BlockPos.of(packed));\n        }\n        entityData.set(WORKING, !workQueue.isEmpty());\n    }'''
+          if old not in s:
+              raise SystemExit('load marker not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+          PY
+          rm .github/workflows/apply-minion-persistence.yml
+      - name: Commit persistence
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Persist Minion inventory and work queue [skip ci]'
+          git push

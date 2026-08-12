@@ -1,6 +1,5 @@
 package atomicstryker.minions.common.entity;
 
-import atomicstryker.minions.common.MinionManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -329,11 +328,6 @@ public final class MinionEntity extends PathfinderMob {
             }
         }
         return around.above();
-    }
-
-    @Override
-    public boolean mobInteract(net.minecraft.world.entity.player.Player player, net.minecraft.world.InteractionHand hand).consumesAction() {
-        return super.mobInteract(player, hand).consumesAction();
     }
 
     @Override

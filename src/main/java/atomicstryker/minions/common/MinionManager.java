@@ -457,7 +457,7 @@ public final class MinionManager {
         worker.setStripMining(true);
 
         for (int step = 0; step < length; step++) {
-            int phase = step + 1;
+            int phase = -1; // independent single-Minion strip queue; do not join shared layer barriers
             BlockPos base = start.relative(forward, step);
             queueBreak(worker, queued, base, phase);
             queueBreak(worker, queued, base.above(), phase);

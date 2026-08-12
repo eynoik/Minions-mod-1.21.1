@@ -1,5 +1,6 @@
 package atomicstryker.minions;
 
+import atomicstryker.minions.registry.MinionsEntities;
 import atomicstryker.minions.registry.MinionsItems;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
@@ -13,6 +14,9 @@ public final class MinionsMod {
 
     public MinionsMod(IEventBus modEventBus) {
         MinionsItems.ITEMS.register(modEventBus);
+        MinionsEntities.ENTITY_TYPES.register(modEventBus);
+        modEventBus.addListener(MinionsEntities::registerAttributes);
+
         LOGGER.info("Minions NeoForge 1.21.1 port bootstrap loaded");
     }
 }

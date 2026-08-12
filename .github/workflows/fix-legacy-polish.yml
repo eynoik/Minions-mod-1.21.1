@@ -1,0 +1,50 @@
+name: One-shot legacy mining cleanup
+
+on:
+  push:
+    branches:
+      - agent/restore-legacy-ui-audio-mining
+    paths:
+      - .github/workflows/fix-legacy-polish.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/restore-legacy-ui-audio-mining
+          fetch-depth: 0
+      - name: Apply cleanup
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/main/java/atomicstryker/minions/common/MinionManager.java')
+          s = p.read_text()
+          s = s.replace('.filter(minion -> !minion.isStripMining())', '.filter(minion -> minion.queuedWork() == 0)')
+          s = s.replace('        worker.setStripMining(true);\n', '')
+          s = s.replace('if (!isValuable(level.getBlockState(start))) {', 'if (!isValuable(level, start)) {')
+          old = '''    private static boolean isValuable(BlockState state) {\n        if (state.isAir() || state.getDestroySpeed(null, BlockPos.ZERO) < 0.0F) {\n            return false;\n        }'''
+          new = '''    private static boolean isValuable(ServerLevel level, BlockPos pos) {\n        BlockState state = level.getBlockState(pos);\n        if (state.isAir() || state.getDestroySpeed(level, pos) < 0.0F) {\n            return false;\n        }'''
+          if old not in s:
+              raise SystemExit('valuable block pattern not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+
+          gp = Path('gradle.properties')
+          g = gp.read_text().replace('mod_version=2.0.3-1.21.1-beta.1', 'mod_version=2.0.3-1.21.1-beta.2')
+          gp.write_text(g)
+
+          Path('.github/workflows/fix-legacy-polish.yml').unlink()
+          PY
+      - name: Commit cleanup
+        run: |
+          git config user.name "meynoik"
+          git config user.email "neynoi.k@gmail.com"
+          git add -A
+          git commit -m "Finish legacy mining cleanup [skip ci]"
+          git push origin HEAD:agent/restore-legacy-ui-audio-mining

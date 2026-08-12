@@ -1,0 +1,66 @@
+name: Apply Minion carry port
+
+on:
+  push:
+    branches: [agent/finish-minions-port]
+    paths:
+      - '.github/workflows/apply-carry-port.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-minions-port
+      - name: Restore Minion carrying
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/main/java/atomicstryker/minions/common/entity/MinionEntity.java')
+          s = p.read_text()
+          s = s.replace('import net.minecraft.world.entity.EntityType;\n', 'import net.minecraft.world.entity.Entity;\nimport net.minecraft.world.entity.EntityType;\n')
+          s = s.replace('    private BlockPos returnContainer;\n', '    private BlockPos returnContainer;\n    private UUID carryTargetUUID;\n')
+          marker = '''    public void setReturnContainer(BlockPos pos) {\n        returnContainer = pos == null ? null : pos.immutable();\n    }\n'''
+          insert = marker + '''\n    public void setCarryTarget(LivingEntity target) {\n        carryTargetUUID = target == null ? null : target.getUUID();\n        clearWork();\n        followingMaster = false;\n        moveTarget = null;\n    }\n\n    public void dropPassengerAndItems() {\n        ejectPassengers();\n        carryTargetUUID = null;\n        dropStoredItems();\n    }\n'''
+          if marker not in s: raise SystemExit('entity method marker missing')
+          s = s.replace(marker, insert)
+          old = '''        if (!workQueue.isEmpty()) {\n            tickWork(serverLevel);\n        } else {\n            entityData.set(WORKING, false);\n            if (returnContainer != null && !inventory.isEmpty()) {'''
+          new = '''        if (!workQueue.isEmpty()) {\n            tickWork(serverLevel);\n        } else {\n            entityData.set(WORKING, false);\n            if (carryTargetUUID != null) {\n                tickCarryTarget(serverLevel);\n            } else if (returnContainer != null && !inventory.isEmpty()) {'''
+          if old not in s: raise SystemExit('entity tick marker missing')
+          s = s.replace(old, new)
+          marker = '''    private void tickFollow(ServerLevel level) {\n'''
+          method = '''    private void tickCarryTarget(ServerLevel level) {\n        Entity target = level.getEntity(carryTargetUUID);\n        if (!(target instanceof LivingEntity living) || !living.isAlive()) {\n            carryTargetUUID = null;\n            navigation.stop();\n            return;\n        }\n        if (distanceToSqr(living) <= 4.0D) {\n            navigation.stop();\n            living.startRiding(this, true);\n            carryTargetUUID = null;\n        } else {\n            navigation.moveTo(living, 1.2D);\n        }\n    }\n\n'''
+          if marker not in s: raise SystemExit('carry method marker missing')
+          s = s.replace(marker, method + marker)
+          old = '''        if (returnContainer != null) {\n            tag.putLong("returnContainer", returnContainer.asLong());\n        }\n\n        NonNullList<ItemStack> savedItems'''
+          new = '''        if (returnContainer != null) {\n            tag.putLong("returnContainer", returnContainer.asLong());\n        }\n        if (carryTargetUUID != null) {\n            tag.putUUID("carryTargetUUID", carryTargetUUID);\n        }\n\n        NonNullList<ItemStack> savedItems'''
+          if old not in s: raise SystemExit('entity carry save marker missing')
+          s = s.replace(old, new)
+          old = '''        returnContainer = tag.contains("returnContainer") ? BlockPos.of(tag.getLong("returnContainer")) : null;\n\n        if (tag.contains("MinionInventory")) {'''
+          new = '''        returnContainer = tag.contains("returnContainer") ? BlockPos.of(tag.getLong("returnContainer")) : null;\n        carryTargetUUID = tag.hasUUID("carryTargetUUID") ? tag.getUUID("carryTargetUUID") : null;\n\n        if (tag.contains("MinionInventory")) {'''
+          if old not in s: raise SystemExit('entity carry load marker missing')
+          s = s.replace(old, new)
+          p.write_text(s)
+
+          p = Path('src/main/java/atomicstryker/minions/common/MinionManager.java')
+          s = p.read_text()
+          s = s.replace('import net.minecraft.world.level.block.state.BlockState;\n', 'import net.minecraft.world.entity.LivingEntity;\nimport net.minecraft.world.level.block.state.BlockState;\n')
+          marker = '''    public static void unsummon(ServerPlayer player) {\n'''
+          method = '''    public static boolean pickup(ServerPlayer player, LivingEntity target) {\n        return getOwned(player).stream()\n                .filter(minion -> !minion.isVehicle())\n                .min(Comparator.comparingDouble(minion -> minion.distanceToSqr(target)))\n                .map(minion -> {\n                    minion.setCarryTarget(target);\n                    return true;\n                })\n                .orElse(false);\n    }\n\n'''
+          if marker not in s: raise SystemExit('manager pickup marker missing')
+          s = s.replace(marker, method + marker)
+          p.write_text(s)
+          PY
+          rm .github/workflows/apply-carry-port.yml
+      - name: Commit carry port
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Restore Minion entity carrying [skip ci]'
+          git push

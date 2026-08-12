@@ -94,10 +94,7 @@ public final class MastersStaffItem extends Item {
         BlockPos clicked = blockHit.getBlockPos();
         BlockEntity blockEntity = level.getBlockEntity(clicked);
         if (blockEntity instanceof Container && MinionManager.hasMinions(player)) {
-            for (MinionEntity minion : MinionManager.getOwned(player)) {
-                minion.setReturnContainer(clicked);
-            }
-            level.playSound(null, clicked, MinionsSounds.RANDOM_ORDER.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
+            MinionManager.assignReturnContainer(player, clicked, player.isShiftKeyDown());
             player.displayClientMessage(Component.translatable("message.minions.chest"), true);
             return;
         }

@@ -99,6 +99,47 @@ public final class MinionManager {
         playOrder(player, MinionsSounds.ORDER_FOLLOW_PLAYER.get());
     }
 
+    public static void stopWork(ServerPlayer player) {
+        for (MinionEntity minion : getOwned(player)) {
+            minion.clearWork();
+            minion.clearMoveTarget();
+            minion.setFollowing(false);
+        }
+        playOrder(player, MinionsSounds.RANDOM_ORDER.get());
+    }
+
+    public static void assignReturnContainer(ServerPlayer player, BlockPos target, boolean preserveCurrentJob) {
+        if (!(player.serverLevel().getBlockEntity(target) instanceof net.minecraft.world.Container)) {
+            return;
+        }
+        for (MinionEntity minion : getOwned(player)) {
+            if (!preserveCurrentJob) {
+                minion.clearWork();
+                minion.clearMoveTarget();
+                minion.setFollowing(false);
+            }
+            minion.setReturnContainer(target, !preserveCurrentJob);
+        }
+        playOrder(player, MinionsSounds.RANDOM_ORDER.get());
+    }
+
+    public static boolean canWorkPhase(UUID owner, int phase) {
+        if (owner == null || phase <= 0) {
+            return true;
+        }
+        LOADED_MINIONS.removeIf(entity -> entity.isRemoved() || !entity.isAlive());
+        for (MinionEntity minion : LOADED_MINIONS) {
+            if (!owner.equals(minion.getOwnerUUID())) {
+                continue;
+            }
+            int lowest = minion.lowestQueuedPhase();
+            if (lowest >= 0 && lowest < phase) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static boolean pickup(ServerPlayer player, LivingEntity target) {
         boolean accepted = getOwned(player).stream()
                 .filter(minion -> !minion.isVehicle())
@@ -335,15 +376,16 @@ public final class MinionManager {
 
         List<QueuedWork> work = new ArrayList<>();
         // Match the old job: clear the three entrance blocks first, then index top-down.
-        work.add(QueuedWork.breakBlock(start));
-        work.add(QueuedWork.breakBlock(start.above()));
-        work.add(QueuedWork.breakBlock(start.above(2)));
+        work.add(QueuedWork.breakBlock(start, 0));
+        work.add(QueuedWork.breakBlock(start.above(), 0));
+        work.add(QueuedWork.breakBlock(start.above(2), 0));
         for (int y = maxY; y >= minY; y--) {
+            int phase = (maxY - y) + 1;
             for (int z = minZ; z <= maxZ; z++) {
                 for (int x = minX; x <= maxX; x++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     if (!player.serverLevel().getBlockState(pos).isAir()) {
-                        work.add(QueuedWork.breakBlock(pos));
+                        work.add(QueuedWork.breakBlock(pos, phase));
                     }
                 }
             }
@@ -376,13 +418,13 @@ public final class MinionManager {
                 for (int zDiff = 0; zDiff <= 4; zDiff++) {
                     BlockPos pos = start.offset(xDiff, -depth, zDiff);
                     if (isStairwellCorner(depth, currentSegment, xDiff, zDiff)) {
-                        work.add(QueuedWork.placeCobble(pos));
+                        work.add(QueuedWork.placeCobble(pos, depth + 1));
                     } else {
                         Direction stairFacing = stairFacing(depth, currentSegment, xDiff, zDiff);
                         if (stairFacing != null) {
-                            work.add(QueuedWork.placeStair(pos, stairFacing));
+                            work.add(QueuedWork.placeStair(pos, stairFacing, depth + 1));
                         } else if (!level.getBlockState(pos).isAir()) {
-                            work.add(QueuedWork.breakBlock(pos));
+                            work.add(QueuedWork.breakBlock(pos, depth + 1));
                         }
                     }
                 }
@@ -398,7 +440,7 @@ public final class MinionManager {
 
     public static void stripMine(ServerPlayer player, BlockPos start) {
         List<MinionEntity> minions = getOwned(player);
-        MinionEntity worker = minions.stream().filter(minion -> minion.queuedWork() == 0).findFirst().orElse(null);
+        MinionEntity worker = minions.stream().filter(minion -> !minion.isStripMining()).findFirst().orElse(null);
         if (worker == null) {
             return;
         }
@@ -412,25 +454,27 @@ public final class MinionManager {
         worker.clearWork();
         worker.setFollowing(false);
         worker.clearMoveTarget();
+        worker.setStripMining(true);
 
         for (int step = 0; step < length; step++) {
+            int phase = step + 1;
             BlockPos base = start.relative(forward, step);
-            queueBreak(worker, queued, base);
-            queueBreak(worker, queued, base.above());
+            queueBreak(worker, queued, base, phase);
+            queueBreak(worker, queued, base.above(), phase);
 
             if (level.getBlockState(base.below()).isAir()) {
-                worker.enqueuePlaceDirt(base.below());
+                worker.enqueuePlaceDirt(base.below(), phase);
             }
 
-            scanValuableVein(level, worker, queued, base.above(2));
-            scanValuableVein(level, worker, queued, base.relative(side));
-            scanValuableVein(level, worker, queued, base.relative(side.getOpposite()));
-            scanValuableVein(level, worker, queued, base.above().relative(side));
-            scanValuableVein(level, worker, queued, base.above().relative(side.getOpposite()));
-            scanValuableVein(level, worker, queued, base.below());
+            scanValuableVein(level, worker, queued, base.above(2), phase);
+            scanValuableVein(level, worker, queued, base.relative(side), phase);
+            scanValuableVein(level, worker, queued, base.relative(side.getOpposite()), phase);
+            scanValuableVein(level, worker, queued, base.above().relative(side), phase);
+            scanValuableVein(level, worker, queued, base.above().relative(side.getOpposite()), phase);
+            scanValuableVein(level, worker, queued, base.below(), phase);
 
             if (step > 0 && step % 7 == 0) {
-                worker.enqueuePlaceTorch(base.relative(forward.getOpposite(), 2));
+                worker.enqueuePlaceTorch(base.relative(forward.getOpposite(), 2), phase);
             }
         }
 
@@ -438,18 +482,18 @@ public final class MinionManager {
         exhaustBig(player);
     }
 
-    private static void scanValuableVein(ServerLevel level, MinionEntity worker, Set<BlockPos> queued, BlockPos start) {
+    private static void scanValuableVein(ServerLevel level, MinionEntity worker, Set<BlockPos> queued, BlockPos start, int phase) {
         if (!isValuable(level, start)) {
             return;
         }
         for (BlockPos pos : floodMatching(level, start, Math.min(64, MinionsConfig.MAX_VEIN_BLOCKS.get()), false)) {
-            queueBreak(worker, queued, pos);
+            queueBreak(worker, queued, pos, phase);
         }
     }
 
-    private static void queueBreak(MinionEntity worker, Set<BlockPos> queued, BlockPos pos) {
+    private static void queueBreak(MinionEntity worker, Set<BlockPos> queued, BlockPos pos, int phase) {
         if (queued.add(pos.immutable())) {
-            worker.enqueueWork(pos);
+            worker.enqueueWork(pos, phase);
         }
     }
 
@@ -538,11 +582,11 @@ public final class MinionManager {
         for (QueuedWork order : orders) {
             MinionEntity worker = minions.get(index++ % minions.size());
             switch (order.action) {
-                case BREAK -> worker.enqueueWork(order.pos);
-                case COBBLE -> worker.enqueuePlaceCobble(order.pos);
-                case DIRT -> worker.enqueuePlaceDirt(order.pos);
-                case STAIR -> worker.enqueuePlaceStair(order.pos, order.facing);
-                case TORCH -> worker.enqueuePlaceTorch(order.pos);
+                case BREAK -> worker.enqueueWork(order.pos, order.phase);
+                case COBBLE -> worker.enqueuePlaceCobble(order.pos, order.phase);
+                case DIRT -> worker.enqueuePlaceDirt(order.pos, order.phase);
+                case STAIR -> worker.enqueuePlaceStair(order.pos, order.facing, order.phase);
+                case TORCH -> worker.enqueuePlaceTorch(order.pos, order.phase);
             }
         }
     }
@@ -578,17 +622,21 @@ public final class MinionManager {
         TORCH
     }
 
-    private record QueuedWork(BlockPos pos, OrderAction action, Direction facing) {
+    private record QueuedWork(BlockPos pos, OrderAction action, Direction facing, int phase) {
         private static QueuedWork breakBlock(BlockPos pos) {
-            return new QueuedWork(pos.immutable(), OrderAction.BREAK, null);
+            return breakBlock(pos, 0);
         }
 
-        private static QueuedWork placeCobble(BlockPos pos) {
-            return new QueuedWork(pos.immutable(), OrderAction.COBBLE, null);
+        private static QueuedWork breakBlock(BlockPos pos, int phase) {
+            return new QueuedWork(pos.immutable(), OrderAction.BREAK, null, phase);
         }
 
-        private static QueuedWork placeStair(BlockPos pos, Direction facing) {
-            return new QueuedWork(pos.immutable(), OrderAction.STAIR, facing);
+        private static QueuedWork placeCobble(BlockPos pos, int phase) {
+            return new QueuedWork(pos.immutable(), OrderAction.COBBLE, null, phase);
+        }
+
+        private static QueuedWork placeStair(BlockPos pos, Direction facing, int phase) {
+            return new QueuedWork(pos.immutable(), OrderAction.STAIR, facing, phase);
         }
     }
 }

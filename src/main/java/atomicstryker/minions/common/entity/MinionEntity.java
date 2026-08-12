@@ -88,7 +88,7 @@ public final class MinionEntity extends PathfinderMob {
 
     public static AttributeSupplier.Builder createDefaultAttributes() {
         return LivingEntity.createLivingAttributes()
-                .add(Attributes.MAX_HEALTH, 20.0D)
+                .add(Attributes.MAX_HEALTH, 24.0D)
                 .add(Attributes.MOVEMENT_SPEED, 0.225D)
                 .add(Attributes.FOLLOW_RANGE, 30.0D);
     }
@@ -786,6 +786,11 @@ public final class MinionEntity extends PathfinderMob {
             }
         }
         return around.above();
+    }
+
+    @Override
+    public boolean causeFallDamage(float fallDistance, float damageMultiplier, DamageSource source) {
+        return false;
     }
 
     @Override

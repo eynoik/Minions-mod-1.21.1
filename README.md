@@ -35,7 +35,7 @@ The original work is **not relicensed by this repository**. Original code and as
 
 ## Current version
 
-**`2.0.3-1.21.1-beta.8`**
+**`2.0.3-1.21.1-beta.9`**
 
 Target:
 
@@ -66,6 +66,7 @@ Target:
 - dropped-item pickup after the legacy-style 10-second delay
 - automatic return to an assigned container or owner when the backpack fills, then resume work
 - carrying mobs/players and throwing carried inventory toward the owner
+- 24 HP Minions with explicit fall-damage immunity; environmental hazards remain ignored and Master's Staff lightning cannot hurt or ignite Minions
 - owner-missing despawn timer
 - persistent ownership, inventory and unfinished work queues
 - NeoForge custom-payload networking

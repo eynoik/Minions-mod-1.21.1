@@ -1,3 +1,12 @@
 {
-  "item.minions.masterstaff": "Master's Staff"
+  "item.minions.masterstaff": "Master's Staff",
+  "entity.minions.minion": "Minion",
+  "message.minions.summon": "A minion answers your call.",
+  "message.minions.move": "Minions moving to target.",
+  "message.minions.follow": "Minions will follow you.",
+  "message.minions.unsummoned": "Minions dismissed.",
+  "message.minions.chop": "Minions ordered to harvest the tree.",
+  "message.minions.mine": "Minions ordered to mine the vein.",
+  "message.minions.chest": "Minions will return carried items to this inventory.",
+  "message.minions.no_willpower": "You are too hungry to command the minions."
 }

@@ -1,6 +1,7 @@
 package atomicstryker.minions;
 
 import atomicstryker.minions.common.MinionsConfig;
+import atomicstryker.minions.network.MinionsNetwork;
 import atomicstryker.minions.registry.MinionsEntities;
 import atomicstryker.minions.registry.MinionsItems;
 import com.mojang.logging.LogUtils;
@@ -21,6 +22,7 @@ public final class MinionsMod {
         MinionsItems.ITEMS.register(modEventBus);
         MinionsEntities.ENTITY_TYPES.register(modEventBus);
         modEventBus.addListener(MinionsEntities::registerAttributes);
+        modEventBus.addListener(MinionsNetwork::registerPayloads);
         modEventBus.addListener(this::addCreativeTabItems);
         modContainer.registerConfig(ModConfig.Type.COMMON, MinionsConfig.SPEC);
 

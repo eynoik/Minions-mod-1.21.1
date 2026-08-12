@@ -16,19 +16,20 @@ public final class MinionsScreen extends Screen {
         int x = width / 2 - 100;
         int y = height / 4 + 20;
 
-        addRenderableWidget(Button.builder(
-                        Component.translatable("screen.minions.orders"),
-                        button -> minecraft.setScreen(new MinionOrdersScreen(this)))
-                .bounds(x, y, 200, 20).build());
-
         boolean hasMasterStaff = minecraft != null
                 && minecraft.player != null
                 && EvilDeeds.hasMasterStaff(minecraft.player);
-        if (!hasMasterStaff) {
+
+        if (hasMasterStaff) {
+            addRenderableWidget(Button.builder(
+                            Component.translatable("screen.minions.orders"),
+                            button -> minecraft.setScreen(new MinionOrdersScreen(this)))
+                    .bounds(x, y, 200, 20).build());
+        } else {
             addRenderableWidget(Button.builder(
                             Component.translatable("screen.minions.evildeed"),
                             button -> minecraft.setScreen(new EvilDeedScreen(this)))
-                    .bounds(x, y + 40, 200, 20).build());
+                    .bounds(x, y, 200, 20).build());
         }
 
         addRenderableWidget(Button.builder(

@@ -22,6 +22,7 @@
   "screen.minions.custom.reset": "Resetuj wymiary",
   "screen.minions.custom.width": "Szerokość: %s",
   "screen.minions.custom.height": "Wysokość: %s",
+  "screen.minions.custom.size": "Rozmiar kopania: %s x %s x %s",
   "message.minions.summon": "Minion odpowiada na wezwanie.",
   "message.minions.move": "Miniony ruszają do celu.",
   "message.minions.follow": "Miniony będą za tobą podążać.",

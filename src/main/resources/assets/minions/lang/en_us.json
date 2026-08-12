@@ -22,6 +22,7 @@
   "screen.minions.custom.reset": "Reset Dimensions",
   "screen.minions.custom.width": "Width: %s",
   "screen.minions.custom.height": "Height: %s",
+  "screen.minions.custom.size": "Dig size: %s x %s x %s",
   "message.minions.summon": "A minion answers your call.",
   "message.minions.move": "Minions moving to target.",
   "message.minions.follow": "Minions will follow you.",

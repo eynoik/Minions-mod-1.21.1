@@ -2,9 +2,11 @@ package atomicstryker.minions.common;
 
 import atomicstryker.minions.MinionsMod;
 import atomicstryker.minions.registry.MinionsItems;
+import atomicstryker.minions.registry.MinionsSounds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LightningBolt;
 import net.minecraft.world.entity.LivingEntity;
@@ -29,11 +31,14 @@ public final class StaffMagicEvents {
 
         event.setCanceled(true);
         if (!MinionManager.canUsePower(player)) {
+            player.level().playSound(null, player.blockPosition(), MinionsSounds.FART.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
             return;
         }
 
         ServerLevel level = player.serverLevel();
         BlockPos strikePos = event.getPos().relative(event.getFace());
+        level.playSound(null, player.blockPosition(), MinionsSounds.BOLT.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
+
         LightningBolt lightning = EntityType.LIGHTNING_BOLT.create(level);
         if (lightning != null) {
             lightning.setVisualOnly(true);

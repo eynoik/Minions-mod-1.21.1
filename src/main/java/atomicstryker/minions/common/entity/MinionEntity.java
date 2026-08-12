@@ -73,6 +73,7 @@ public final class MinionEntity extends PathfinderMob {
     private int pickupDisabledTicks;
     private int ownerMissingTicks;
     private int workTicks;
+    private int workBoostTicks;
     private boolean inventoryFull;
     private boolean forceReturnGoods;
     private boolean stripMining;
@@ -126,6 +127,11 @@ public final class MinionEntity extends PathfinderMob {
 
     public boolean isWorking() {
         return entityData.get(WORKING);
+    }
+
+    /** Applies the legacy owner work boost. Reapplying refreshes the remaining duration. */
+    public void applyWorkBoost(int ticks) {
+        workBoostTicks = Math.max(workBoostTicks, Math.max(0, ticks));
     }
 
     public void setFollowing(boolean following) {
@@ -307,6 +313,10 @@ public final class MinionEntity extends PathfinderMob {
             return;
         }
 
+        if (workBoostTicks > 0) {
+            workBoostTicks--;
+        }
+
         tickOwnerDespawn(serverLevel);
         if (isRemoved()) {
             return;
@@ -428,7 +438,7 @@ public final class MinionEntity extends PathfinderMob {
             } else {
                 requiredTicks = Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
             }
-            workTicks++;
+            workTicks += workBoostTicks > 0 ? 2 : 1;
 
             if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
                 int crack = Math.min(9, (workTicks * 10) / Math.max(1, requiredTicks));
@@ -786,6 +796,16 @@ public final class MinionEntity extends PathfinderMob {
             }
         }
         return around.above();
+    }
+
+    @Override
+    public void die(DamageSource source) {
+        // The custom 24-slot backpack is not vanilla equipment, so explicitly
+        // empty it into the world before the entity death/removal sequence.
+        if (!level().isClientSide) {
+            dropStoredItems();
+        }
+        super.die(source);
     }
 
     @Override

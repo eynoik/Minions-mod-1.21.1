@@ -35,7 +35,7 @@ The original work is **not relicensed by this repository**. Original code and as
 
 ## Current version
 
-**`2.0.3-1.21.1-beta.9`**
+**`2.0.3-1.21.1-beta.10`**
 
 Target:
 
@@ -62,7 +62,7 @@ Target:
 - custom area digging with the old-style size selector
 - world-space selection grid before dig commands are confirmed
 - ordered shared excavation so Minions complete a layer before moving deeper
-- 24-slot Minion backpack
+- 24-slot Minion backpack; its contents are dropped into the world if the Minion dies
 - dropped-item pickup after the legacy-style 10-second delay
 - automatic return to an assigned container or owner when the backpack fills, then resume work
 - carrying mobs/players and throwing carried inventory toward the owner
@@ -79,6 +79,7 @@ Target:
 - `M` -> `Commit to Evil` — evil-deed menu, available only before obtaining the Master's Staff
 - `Dig Mineshaft`, `Strip Mine` or `Dig...` — enter world selection mode; aim the grid and right-click with the Master's Staff to confirm
 - `Dig...` — choose custom tunnel/area dimensions first
+- quick right-click with the Master's Staff in open air — 30-second 2x work-speed boost for your Minions, with the bolt sound
 - quick right-click with the Master's Staff on a block — summon a missing Minion or move the group
 - right-click a log — start nearby tree harvesting
 - Shift + quick right-click a block — mine the matching connected vein

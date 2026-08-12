@@ -87,6 +87,12 @@ public final class MastersStaffItem extends Item {
         }
 
         HitResult hit = player.pick(30.0D, 1.0F, false);
+        if (hit.getType() == HitResult.Type.MISS) {
+            // Quick right-click into open air: legacy whip/work-speed boost,
+            // without needing to hit a Minion or target a block.
+            MinionManager.boostWork(player);
+            return;
+        }
         if (!(hit instanceof BlockHitResult blockHit)) {
             return;
         }

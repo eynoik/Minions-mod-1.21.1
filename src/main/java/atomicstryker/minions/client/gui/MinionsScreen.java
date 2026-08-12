@@ -23,6 +23,9 @@ public final class MinionsScreen extends Screen {
         int h = 20;
         int gap = 24;
 
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.evildeed"), button -> send(MinionCommandPayload.Command.COMMIT_EVIL))
+                .bounds(width / 2 - 100, y - gap, 200, h).build());
+
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.follow"), button -> send(MinionCommandPayload.Command.FOLLOW))
                 .bounds(x, y, w, h).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.unsummon"), button -> send(MinionCommandPayload.Command.UNSUMMON))

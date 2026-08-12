@@ -1,5 +1,7 @@
 package atomicstryker.minions.common.entity;
 
+import atomicstryker.minions.common.MinionManager;
+import atomicstryker.minions.common.MinionsConfig;
 import atomicstryker.minions.registry.MinionsSounds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -14,12 +16,16 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -27,6 +33,8 @@ import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.RandomStrollGoal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -61,10 +69,17 @@ public final class MinionEntity extends PathfinderMob {
     private int stuckTicks;
     private int pickupCooldown;
     private int pickupDisabledTicks;
+    private int ownerMissingTicks;
+    private int workTicks;
+    private boolean inventoryFull;
+    private boolean forceReturnGoods;
+    private boolean stripMining;
+    private WorkOrder activeOrder;
 
     public MinionEntity(EntityType<? extends MinionEntity> entityType, Level level) {
         super(entityType, level);
         setPersistenceRequired();
+        setDropChance(EquipmentSlot.MAINHAND, 0.0F);
     }
 
     public static AttributeSupplier.Builder createDefaultAttributes() {
@@ -132,27 +147,47 @@ public final class MinionEntity extends PathfinderMob {
     }
 
     public void enqueueWork(BlockPos pos) {
-        enqueue(new WorkOrder(pos.immutable(), WorkAction.BREAK, null));
+        enqueueWork(pos, 0);
+    }
+
+    public void enqueueWork(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.BREAK, null, phase));
     }
 
     public void enqueueTreeWork(BlockPos pos) {
-        enqueue(new WorkOrder(pos.immutable(), WorkAction.TREE_BREAK, null));
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.TREE_BREAK, null, 0));
     }
 
     public void enqueuePlaceCobble(BlockPos pos) {
-        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_COBBLE, null));
+        enqueuePlaceCobble(pos, 0);
+    }
+
+    public void enqueuePlaceCobble(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_COBBLE, null, phase));
     }
 
     public void enqueuePlaceDirt(BlockPos pos) {
-        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_DIRT, null));
+        enqueuePlaceDirt(pos, 0);
+    }
+
+    public void enqueuePlaceDirt(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_DIRT, null, phase));
     }
 
     public void enqueuePlaceStair(BlockPos pos, Direction facing) {
-        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_STAIR, facing));
+        enqueuePlaceStair(pos, facing, 0);
+    }
+
+    public void enqueuePlaceStair(BlockPos pos, Direction facing, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_STAIR, facing, phase));
     }
 
     public void enqueuePlaceTorch(BlockPos pos) {
-        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_TORCH, null));
+        enqueuePlaceTorch(pos, 0);
+    }
+
+    public void enqueuePlaceTorch(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_TORCH, null, phase));
     }
 
     private void enqueue(WorkOrder order) {
@@ -162,12 +197,28 @@ public final class MinionEntity extends PathfinderMob {
 
     public void clearWork() {
         workQueue.clear();
+        stripMining = false;
+        forceReturnGoods = false;
+        resetActiveWork();
         entityData.set(WORKING, false);
         navigation.stop();
+        setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
     }
 
     public int queuedWork() {
         return workQueue.size();
+    }
+
+    public int lowestQueuedPhase() {
+        return workQueue.stream().mapToInt(WorkOrder::phase).min().orElse(-1);
+    }
+
+    public boolean isStripMining() {
+        return stripMining;
+    }
+
+    public void setStripMining(boolean value) {
+        stripMining = value;
     }
 
     public Container getInventory() {
@@ -175,7 +226,14 @@ public final class MinionEntity extends PathfinderMob {
     }
 
     public void setReturnContainer(BlockPos pos) {
+        setReturnContainer(pos, false);
+    }
+
+    public void setReturnContainer(BlockPos pos, boolean returnImmediately) {
         returnContainer = pos == null ? null : pos.immutable();
+        if (returnImmediately && !inventory.isEmpty()) {
+            forceReturnGoods = true;
+        }
     }
 
     public void setCarryTarget(LivingEntity target) {
@@ -204,6 +262,8 @@ public final class MinionEntity extends PathfinderMob {
             return;
         }
         pickupDisabledTicks = 60; // legacy blockItemPickUp(): three seconds
+        inventoryFull = false;
+        forceReturnGoods = false;
         Vec3 source = position().add(0.0D, getBbHeight() * 0.65D, 0.0D);
         Vec3 toPlayer = player.getEyePosition().subtract(source);
         Vec3 velocity = toPlayer.lengthSqr() > 0.0001D
@@ -226,6 +286,8 @@ public final class MinionEntity extends PathfinderMob {
             return;
         }
         pickupDisabledTicks = 60;
+        inventoryFull = false;
+        forceReturnGoods = false;
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.removeItemNoUpdate(slot);
             if (!stack.isEmpty()) {
@@ -241,6 +303,11 @@ public final class MinionEntity extends PathfinderMob {
             return;
         }
 
+        tickOwnerDespawn(serverLevel);
+        if (isRemoved()) {
+            return;
+        }
+
         if (pickupDisabledTicks > 0) {
             pickupDisabledTicks--;
         } else if (pickupCooldown-- <= 0) {
@@ -248,19 +315,43 @@ public final class MinionEntity extends PathfinderMob {
             collectNearbyItems(serverLevel);
         }
 
+        if ((inventoryFull || forceReturnGoods) && !inventory.isEmpty()) {
+            if (tickInventoryReturn(serverLevel)) {
+                return;
+            }
+        }
+
         if (!workQueue.isEmpty()) {
             tickWork(serverLevel);
         } else {
+            resetActiveWork();
             entityData.set(WORKING, false);
+            stripMining = false;
+            setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
             if (carryTargetUUID != null) {
                 tickCarryTarget(serverLevel);
-            } else if (returnContainer != null && !inventory.isEmpty()) {
-                tickReturnToContainer(serverLevel);
+            } else if (!inventory.isEmpty() && (returnContainer != null || forceReturnGoods)) {
+                tickInventoryReturn(serverLevel);
             } else if (followingMaster) {
                 tickFollow(serverLevel);
             } else if (moveTarget != null) {
                 tickMoveTarget(serverLevel);
             }
+        }
+    }
+
+    private void tickOwnerDespawn(ServerLevel level) {
+        ServerPlayer owner = getOwner(level);
+        if (owner != null && owner.isAlive()) {
+            ownerMissingTicks = 0;
+            return;
+        }
+
+        ownerMissingTicks++;
+        int delayTicks = MinionsConfig.AUTOMATIC_DESPAWN_DELAY.get() * 20;
+        if (ownerMissingTicks >= delayTicks) {
+            dropStoredItems();
+            discard();
         }
     }
 
@@ -270,26 +361,37 @@ public final class MinionEntity extends PathfinderMob {
             entityData.set(WORKING, false);
             return;
         }
+        if (order.phase() > 0 && !MinionManager.canWorkPhase(ownerUUID, order.phase())) {
+            entityData.set(WORKING, false);
+            navigation.stop();
+            return;
+        }
+
+        if (activeOrder != order) {
+            resetActiveWork();
+            activeOrder = order;
+            workTicks = 0;
+        }
 
         BlockPos target = order.pos();
         BlockState state = level.getBlockState(target);
         if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
             if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
-                workQueue.poll();
+                completeCurrentOrder(level);
                 return;
             }
         } else {
             BlockState desired = desiredState(order);
             if (desired == null) {
-                workQueue.poll();
+                completeCurrentOrder(level);
                 return;
             }
             if (state.equals(desired)) {
-                workQueue.poll();
+                completeCurrentOrder(level);
                 return;
             }
             if (!state.isAir() && state.getDestroySpeed(level, target) < 0.0F) {
-                workQueue.poll();
+                completeCurrentOrder(level);
                 return;
             }
         }
@@ -298,8 +400,33 @@ public final class MinionEntity extends PathfinderMob {
         double workReachSq = order.action() == WorkAction.TREE_BREAK ? 256.0D : 9.0D;
         if (distance <= workReachSq) {
             navigation.stop();
-            swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+            entityData.set(WORKING, true);
+            getLookControl().setLookAt(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
+            adaptWorkingTool(state, order.action());
 
+            int requiredTicks = (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK)
+                    ? MinionsConfig.WORK_TICKS_PER_BLOCK.get()
+                    : Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
+            workTicks++;
+
+            if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
+                int crack = Math.min(9, (workTicks * 10) / Math.max(1, requiredTicks));
+                level.destroyBlockProgress(getId(), target, crack);
+                if (workTicks == 1 || workTicks % 6 == 0) {
+                    swing(InteractionHand.MAIN_HAND);
+                    SoundType soundType = state.getSoundType();
+                    level.playSound(null, target, soundType.getHitSound(), SoundSource.BLOCKS,
+                            Math.max(0.1F, soundType.getVolume() * 0.35F), soundType.getPitch());
+                }
+            } else if (workTicks == 1) {
+                swing(InteractionHand.MAIN_HAND);
+            }
+
+            if (workTicks < requiredTicks) {
+                return;
+            }
+
+            level.destroyBlockProgress(getId(), target, -1);
             if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
                 level.destroyBlock(target, true, this);
             } else {
@@ -312,11 +439,16 @@ public final class MinionEntity extends PathfinderMob {
                 }
             }
 
-            workQueue.poll();
-            stuckTicks = 0;
+            completeCurrentOrder(level);
             return;
         }
 
+        entityData.set(WORKING, false);
+        if (workTicks > 0) {
+            level.destroyBlockProgress(getId(), target, -1);
+            workTicks = 0;
+        }
+        adaptWorkingTool(state, order.action());
         boolean navigating = navigation.moveTo(target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D, 1.15D);
         if (!navigating) {
             stuckTicks++;
@@ -328,6 +460,49 @@ public final class MinionEntity extends PathfinderMob {
         } else {
             stuckTicks = Math.max(0, stuckTicks - 1);
         }
+    }
+
+    private void adaptWorkingTool(BlockState state, WorkAction action) {
+        if (action != WorkAction.BREAK && action != WorkAction.TREE_BREAK) {
+            return;
+        }
+        ItemStack wanted;
+        if (action == WorkAction.TREE_BREAK || state.is(BlockTags.MINEABLE_WITH_AXE)) {
+            wanted = new ItemStack(Items.IRON_AXE);
+        } else if (state.is(BlockTags.MINEABLE_WITH_SHOVEL)) {
+            wanted = new ItemStack(Items.IRON_SHOVEL);
+        } else {
+            wanted = new ItemStack(Items.IRON_PICKAXE);
+        }
+        ItemStack held = getMainHandItem();
+        if (!ItemStack.isSameItemSameComponents(held, wanted)) {
+            setItemInHand(InteractionHand.MAIN_HAND, wanted);
+        }
+    }
+
+    private void completeCurrentOrder(ServerLevel level) {
+        if (activeOrder != null) {
+            level.destroyBlockProgress(getId(), activeOrder.pos(), -1);
+        }
+        workQueue.poll();
+        activeOrder = null;
+        workTicks = 0;
+        stuckTicks = 0;
+        entityData.set(WORKING, false);
+        if (workQueue.isEmpty()) {
+            stripMining = false;
+            if (!inventory.isEmpty()) {
+                forceReturnGoods = true;
+            }
+        }
+    }
+
+    private void resetActiveWork() {
+        if (activeOrder != null && level() instanceof ServerLevel serverLevel) {
+            serverLevel.destroyBlockProgress(getId(), activeOrder.pos(), -1);
+        }
+        activeOrder = null;
+        workTicks = 0;
     }
 
     private BlockState desiredState(WorkOrder order) {
@@ -395,47 +570,73 @@ public final class MinionEntity extends PathfinderMob {
         }
     }
 
-    private void tickReturnToContainer(ServerLevel level) {
-        BlockEntity blockEntity = level.getBlockEntity(returnContainer);
-        if (!(blockEntity instanceof Container container)) {
-            returnContainer = null;
-            return;
-        }
-
-        if (distanceToSqr(returnContainer.getX() + 0.5D, returnContainer.getY() + 0.5D, returnContainer.getZ() + 0.5D) > 9.0D) {
-            navigation.moveTo(returnContainer.getX() + 0.5D, returnContainer.getY(), returnContainer.getZ() + 0.5D, 1.15D);
-            return;
-        }
-
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            ItemStack carried = inventory.getItem(slot);
-            if (carried.isEmpty()) {
-                continue;
-            }
-            ItemStack remaining = carried.copy();
-            for (int targetSlot = 0; targetSlot < container.getContainerSize() && !remaining.isEmpty(); targetSlot++) {
-                ItemStack existing = container.getItem(targetSlot);
-                if (existing.isEmpty()) {
-                    container.setItem(targetSlot, remaining.copy());
-                    remaining = ItemStack.EMPTY;
-                } else if (ItemStack.isSameItemSameComponents(existing, remaining) && existing.getCount() < existing.getMaxStackSize()) {
-                    int moved = Math.min(remaining.getCount(), existing.getMaxStackSize() - existing.getCount());
-                    existing.grow(moved);
-                    remaining.shrink(moved);
-                    container.setItem(targetSlot, existing);
-                }
-            }
-            inventory.setItem(slot, remaining);
-        }
-        container.setChanged();
+    private boolean tickInventoryReturn(ServerLevel level) {
         if (inventory.isEmpty()) {
-            returnContainer = null;
+            inventoryFull = false;
+            forceReturnGoods = false;
+            return false;
         }
+
+        if (returnContainer != null) {
+            BlockEntity blockEntity = level.getBlockEntity(returnContainer);
+            if (!(blockEntity instanceof Container container)) {
+                returnContainer = null;
+            } else {
+                if (distanceToSqr(returnContainer.getX() + 0.5D, returnContainer.getY() + 0.5D, returnContainer.getZ() + 0.5D) > 9.0D) {
+                    navigation.moveTo(returnContainer.getX() + 0.5D, returnContainer.getY(), returnContainer.getZ() + 0.5D, 1.15D);
+                    return true;
+                }
+
+                for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                    ItemStack carried = inventory.getItem(slot);
+                    if (carried.isEmpty()) {
+                        continue;
+                    }
+                    ItemStack remaining = carried.copy();
+                    for (int targetSlot = 0; targetSlot < container.getContainerSize() && !remaining.isEmpty(); targetSlot++) {
+                        ItemStack existing = container.getItem(targetSlot);
+                        if (existing.isEmpty()) {
+                            container.setItem(targetSlot, remaining.copy());
+                            remaining = ItemStack.EMPTY;
+                        } else if (ItemStack.isSameItemSameComponents(existing, remaining) && existing.getCount() < existing.getMaxStackSize()) {
+                            int moved = Math.min(remaining.getCount(), existing.getMaxStackSize() - existing.getCount());
+                            existing.grow(moved);
+                            remaining.shrink(moved);
+                            container.setItem(targetSlot, existing);
+                        }
+                    }
+                    inventory.setItem(slot, remaining);
+                }
+                container.setChanged();
+                if (inventory.isEmpty()) {
+                    inventoryFull = false;
+                    forceReturnGoods = false;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        ServerPlayer owner = getOwner(level);
+        if (owner == null) {
+            navigation.stop();
+            return true;
+        }
+        if (distanceToSqr(owner) > 9.0D) {
+            navigation.moveTo(owner, 1.15D);
+            return true;
+        }
+        navigation.stop();
+        dropStoredItemsToward(owner);
+        return false;
     }
 
     private void collectNearbyItems(ServerLevel level) {
         List<ItemEntity> items = level.getEntitiesOfClass(ItemEntity.class, new AABB(blockPosition()).inflate(4.5D));
         for (ItemEntity itemEntity : items) {
+            if (itemEntity.tickCount <= 200) {
+                continue;
+            }
             ItemStack stack = itemEntity.getItem();
             if (stack.isEmpty()) {
                 continue;
@@ -443,12 +644,15 @@ public final class MinionEntity extends PathfinderMob {
             ItemStack remaining = inventory.addItem(stack.copy());
             int accepted = stack.getCount() - remaining.getCount();
             if (accepted <= 0) {
-                continue;
+                inventoryFull = true;
+                break;
             }
             if (remaining.isEmpty()) {
                 itemEntity.discard();
             } else {
                 itemEntity.setItem(remaining);
+                inventoryFull = true;
+                break;
             }
         }
     }
@@ -472,7 +676,7 @@ public final class MinionEntity extends PathfinderMob {
 
     @Override
     protected SoundEvent getAmbientSound() {
-        return MinionsSounds.MINION_SQUEAK.get();
+        return null;
     }
 
     @Override
@@ -488,6 +692,10 @@ public final class MinionEntity extends PathfinderMob {
             tag.putUUID("masterUUID", ownerUUID);
         }
         tag.putBoolean("followingMaster", followingMaster);
+        tag.putBoolean("inventoryFull", inventoryFull);
+        tag.putBoolean("forceReturnGoods", forceReturnGoods);
+        tag.putBoolean("stripMining", stripMining);
+        tag.putInt("ownerMissingTicks", ownerMissingTicks);
         if (moveTarget != null) {
             tag.putLong("moveTarget", moveTarget.asLong());
         }
@@ -512,6 +720,7 @@ public final class MinionEntity extends PathfinderMob {
             workTag.putLong("Pos", order.pos().asLong());
             workTag.putInt("Action", order.action().ordinal());
             workTag.putInt("Facing", order.facing() == null ? -1 : order.facing().get3DDataValue());
+            workTag.putInt("Phase", order.phase());
             workList.add(workTag);
         }
         tag.put("workQueueV2", workList);
@@ -527,6 +736,10 @@ public final class MinionEntity extends PathfinderMob {
             ownerUUID = tag.getUUID("masterUUID");
         }
         followingMaster = tag.getBoolean("followingMaster");
+        inventoryFull = tag.getBoolean("inventoryFull");
+        forceReturnGoods = tag.getBoolean("forceReturnGoods");
+        stripMining = tag.getBoolean("stripMining");
+        ownerMissingTicks = tag.getInt("ownerMissingTicks");
         moveTarget = tag.contains("moveTarget") ? BlockPos.of(tag.getLong("moveTarget")) : null;
         returnContainer = tag.contains("returnContainer") ? BlockPos.of(tag.getLong("returnContainer")) : null;
         carryTargetUUID = tag.hasUUID("carryTargetUUID") ? tag.getUUID("carryTargetUUID") : null;
@@ -549,12 +762,12 @@ public final class MinionEntity extends PathfinderMob {
                 WorkAction action = actionId >= 0 && actionId < actions.length ? actions[actionId] : WorkAction.BREAK;
                 int facingId = workTag.getInt("Facing");
                 Direction facing = facingId < 0 ? null : Direction.from3DDataValue(facingId);
-                workQueue.add(new WorkOrder(BlockPos.of(workTag.getLong("Pos")), action, facing));
+                workQueue.add(new WorkOrder(BlockPos.of(workTag.getLong("Pos")), action, facing, workTag.contains("Phase") ? workTag.getInt("Phase") : 0));
             }
         } else {
             // beta.1 compatibility
             for (long packed : tag.getLongArray("workQueue")) {
-                workQueue.add(new WorkOrder(BlockPos.of(packed), WorkAction.BREAK, null));
+                workQueue.add(new WorkOrder(BlockPos.of(packed), WorkAction.BREAK, null, 0));
             }
         }
         entityData.set(WORKING, !workQueue.isEmpty());
@@ -574,6 +787,6 @@ public final class MinionEntity extends PathfinderMob {
         TREE_BREAK
     }
 
-    public record WorkOrder(BlockPos pos, WorkAction action, Direction facing) {
+    public record WorkOrder(BlockPos pos, WorkAction action, Direction facing, int phase) {
     }
 }

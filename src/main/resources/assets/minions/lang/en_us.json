@@ -14,7 +14,7 @@
   "screen.minions.customdig": "Dig Area",
   "screen.minions.customdig_short": "Dig...",
   "screen.minions.minevein": "Mine Vein",
-  "screen.minions.choptree": "Chop Tree",
+  "screen.minions.choptree": "Chop Nearby Trees",
   "screen.minions.drop": "Drop Items",
   "screen.minions.deeds.title": "Choose your part!",
   "screen.minions.custom.title": "You want WHAT?!",
@@ -35,5 +35,8 @@
   "message.minions.deeds_disabled": "Evil deeds are disabled on this server.",
   "message.minions.need_xp": "You need %s experience levels to commit an evil deed.",
   "message.minions.deed_progress": "The darkness noticed. Deeds: %s/%s.",
-  "message.minions.staff_reward": "The darkness rewards you with the Master's Staff."
+  "message.minions.staff_reward": "The darkness rewards you with the Master's Staff.",
+  "screen.minions.move": "Move Minions",
+  "screen.minions.chest": "Assign Return Chest",
+  "screen.minions.stop": "Stop Current Work"
 }

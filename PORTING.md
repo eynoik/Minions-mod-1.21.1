@@ -21,6 +21,12 @@
 - [x] Strip-mine 1x2 tunnel, floor repair, wall/roof/floor valuable scanning and torches
 - [x] Directed custom-area dig using the original width/height bounds
 - [x] Item pickup and 24-slot Minion inventory
+- [x] Legacy 10-second dropped-item age before Minion pickup
+- [x] Full-backpack return-to-chest/master and automatic job resume
+- [x] Timed one-second block work, crack progress, swing animation and material-aware iron tools
+- [x] Automatic owner-missing despawn timer (legacy 300 second default)
+- [x] Strip-mine worker takeover from another non-strip job and explicit work cancellation
+- [x] Layer/depth phase barriers for orderly excavation instead of scattered vertical digging
 - [x] Return/deposit items into inventories
 - [x] Pick up/carry living entities
 - [x] Drop passenger/items command

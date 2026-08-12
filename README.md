@@ -10,7 +10,7 @@ Playable NeoForge 1.21.1 port of AtomicStryker's Minions mod from Forge 1.12.2.
 
 ## Current version
 
-`2.0.3-1.21.1-beta.3`
+`2.0.3-1.21.1-beta.4`
 
 ## Implemented
 

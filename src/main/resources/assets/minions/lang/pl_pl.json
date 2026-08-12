@@ -14,7 +14,7 @@
   "screen.minions.customdig": "Wykop obszar",
   "screen.minions.customdig_short": "Kop...",
   "screen.minions.minevein": "Wykop żyłę",
-  "screen.minions.choptree": "Ścinaj drzewo",
+  "screen.minions.choptree": "Ścinaj pobliskie drzewa",
   "screen.minions.drop": "Wyrzuć przedmioty",
   "screen.minions.deeds.title": "Wybierz swój udział!",
   "screen.minions.custom.title": "Chcesz CO?!",
@@ -35,5 +35,8 @@
   "message.minions.deeds_disabled": "Złe uczynki są wyłączone na tym serwerze.",
   "message.minions.need_xp": "Potrzebujesz %s poziomów doświadczenia, żeby popełnić zły uczynek.",
   "message.minions.deed_progress": "Ciemność zauważyła. Uczynki: %s/%s.",
-  "message.minions.staff_reward": "Ciemność nagradza cię Kosturem Mistrza."
+  "message.minions.staff_reward": "Ciemność nagradza cię Kosturem Mistrza.",
+  "screen.minions.move": "Przenieś Miniony",
+  "screen.minions.chest": "Przypisz skrzynię zwrotną",
+  "screen.minions.stop": "Przerwij obecną pracę"
 }

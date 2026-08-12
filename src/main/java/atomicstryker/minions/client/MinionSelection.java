@@ -16,7 +16,11 @@ public final class MinionSelection {
         NONE,
         MINESHAFT,
         STRIP_MINE,
-        CUSTOM
+        CUSTOM,
+        MOVE,
+        CHOP_TREE,
+        MINE_VEIN,
+        ASSIGN_CHEST
     }
 
     private static Mode mode = Mode.NONE;
@@ -66,7 +70,9 @@ public final class MinionSelection {
     public static void updateFromCrosshair() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.hitResult instanceof BlockHitResult blockHit) {
-            target = blockHit.getBlockPos().immutable();
+            target = mode == Mode.MOVE
+                    ? blockHit.getBlockPos().relative(blockHit.getDirection()).immutable()
+                    : blockHit.getBlockPos().immutable();
         }
     }
 
@@ -75,10 +81,16 @@ public final class MinionSelection {
             return false;
         }
 
+        Minecraft minecraft = Minecraft.getInstance();
+        int sneaking = minecraft.player != null && minecraft.player.isShiftKeyDown() ? 1 : 0;
         MinionCommandPayload payload = switch (mode) {
             case MINESHAFT -> new MinionCommandPayload(MinionCommandPayload.Command.DIG_STAIRWELL, target);
             case STRIP_MINE -> new MinionCommandPayload(MinionCommandPayload.Command.STRIP_MINE, target);
             case CUSTOM -> new MinionCommandPayload(MinionCommandPayload.Command.CUSTOM_DIG, target, customSizeXZ, customSizeY);
+            case MOVE -> new MinionCommandPayload(MinionCommandPayload.Command.MOVE, target);
+            case CHOP_TREE -> new MinionCommandPayload(MinionCommandPayload.Command.CHOP_TREE, target);
+            case MINE_VEIN -> new MinionCommandPayload(MinionCommandPayload.Command.MINE_VEIN, target);
+            case ASSIGN_CHEST -> new MinionCommandPayload(MinionCommandPayload.Command.ASSIGN_CHEST, target, sneaking, 0);
             case NONE -> null;
         };
         if (payload == null) {
@@ -103,6 +115,7 @@ public final class MinionSelection {
             );
             case STRIP_MINE -> boxBetween(target, target.relative(direction, 2).above());
             case CUSTOM -> customBox(target, direction, customSizeXZ, customSizeY);
+            case MOVE, CHOP_TREE, MINE_VEIN, ASSIGN_CHEST -> new AABB(target);
             case NONE -> null;
         };
     }

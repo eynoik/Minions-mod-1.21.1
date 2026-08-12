@@ -44,6 +44,8 @@ public record MinionCommandPayload(Command command, BlockPos target, int arg0, i
             case FOLLOW -> MinionManager.follow(player);
             case UNSUMMON -> MinionManager.unsummon(player);
             case MOVE -> MinionManager.moveTo(player, target);
+            case ASSIGN_CHEST -> MinionManager.assignReturnContainer(player, target, arg0 != 0);
+            case STOP_WORK -> MinionManager.stopWork(player);
             case DIG_STAIRWELL -> {
                 if (MinionManager.canUsePower(player)) MinionManager.digStairwell(player, target);
             }
@@ -76,6 +78,8 @@ public record MinionCommandPayload(Command command, BlockPos target, int arg0, i
         FOLLOW,
         UNSUMMON,
         MOVE,
+        ASSIGN_CHEST,
+        STOP_WORK,
         DIG_STAIRWELL,
         STRIP_MINE,
         CUSTOM_DIG,

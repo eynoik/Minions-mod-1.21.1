@@ -23,7 +23,10 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Apply parity patch
-        run: python3 .github/scripts/parity_beta4.py
+        shell: bash
+        run: |
+          python3 .github/scripts/parity_beta4.py
+          sed -i 's/import net.minecraft.sounds.SoundType;/import net.minecraft.world.level.block.SoundType;/' src/main/java/atomicstryker/minions/common/entity/MinionEntity.java
       - name: Build patched port
         run: ./gradlew build --stacktrace
       - name: Commit patched port

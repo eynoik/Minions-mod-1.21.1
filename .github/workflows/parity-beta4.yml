@@ -1,0 +1,1221 @@
+name: Beta4 parity migration
+
+on:
+  push:
+    branches:
+      - agent/parity-workflow-beta4
+    paths:
+      - .github/workflows/parity-beta4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/parity-workflow-beta4
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Restore worker parity systems
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import json
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'missing patch target: {label}')
+              return text.replace(old, new, 1)
+
+          # Config: old 1 second block tasks + 5 minute orphan despawn.
+          p = Path('src/main/java/atomicstryker/minions/common/MinionsConfig.java')
+          s = p.read_text()
+          s = replace_once(s,
+              '    public static final ModConfigSpec.DoubleValue FOLLOW_RANGE;\n',
+              '    public static final ModConfigSpec.DoubleValue FOLLOW_RANGE;\n    public static final ModConfigSpec.IntValue AUTOMATIC_DESPAWN_DELAY;\n',
+              'config declarations despawn')
+          s = replace_once(s,
+              '    public static final ModConfigSpec.IntValue CUSTOM_DIG_HEIGHT;\n',
+              '    public static final ModConfigSpec.IntValue CUSTOM_DIG_HEIGHT;\n    public static final ModConfigSpec.IntValue WORK_TICKS_PER_BLOCK;\n',
+              'config declarations work time')
+          s = replace_once(s,
+              '        FOLLOW_RANGE = builder.comment("Base follow range of minions.")\n                .defineInRange("followRange", 30.0D, 8.0D, 128.0D);\n',
+              '        FOLLOW_RANGE = builder.comment("Base follow range of minions.")\n                .defineInRange("followRange", 30.0D, 8.0D, 128.0D);\n        AUTOMATIC_DESPAWN_DELAY = builder.comment("Seconds before a Minion whose owner is offline/dead despawns and drops its inventory. Legacy default: 300.")\n                .defineInRange("automaticDespawnDelay", 300, 0, 3600);\n',
+              'config despawn setting')
+          s = replace_once(s,
+              '        CUSTOM_DIG_HEIGHT = builder.comment("Default custom dig height. The in-game legacy menu can select 3..25.")\n                .defineInRange("customDigHeight", 3, 3, 25);\n',
+              '        CUSTOM_DIG_HEIGHT = builder.comment("Default custom dig height. The in-game legacy menu can select 3..25.")\n                .defineInRange("customDigHeight", 3, 3, 25);\n        WORK_TICKS_PER_BLOCK = builder.comment("Base work time per mined block. Legacy BlockTask default was one second = 20 ticks.")\n                .defineInRange("workTicksPerBlock", 20, 1, 200);\n',
+              'config work setting')
+          p.write_text(s)
+
+          # Renderer: restore visible working tool layer.
+          p = Path('src/main/java/atomicstryker/minions/client/render/MinionRenderer.java')
+          s = p.read_text()
+          s = replace_once(s,
+              'import net.minecraft.client.renderer.entity.MobRenderer;\n',
+              'import net.minecraft.client.renderer.entity.MobRenderer;\nimport net.minecraft.client.renderer.entity.layers.ItemInHandLayer;\n',
+              'renderer import')
+          s = replace_once(s,
+              '    public MinionRenderer(EntityRendererProvider.Context context) {\n        super(context, new MinionModel(context.bakeLayer(MinionModel.LAYER)), 0.3F);\n    }\n',
+              '    public MinionRenderer(EntityRendererProvider.Context context) {\n        super(context, new MinionModel(context.bakeLayer(MinionModel.LAYER)), 0.3F);\n        addLayer(new ItemInHandLayer<>(this, context.getItemInHandRenderer()));\n    }\n',
+              'renderer tool layer')
+          p.write_text(s)
+
+          # Command payload: full menu orders, including chest assignment and hard stop.
+          p = Path('src/main/java/atomicstryker/minions/network/MinionCommandPayload.java')
+          s = p.read_text()
+          s = replace_once(s,
+              '            case MOVE -> MinionManager.moveTo(player, target);\n',
+              '            case MOVE -> MinionManager.moveTo(player, target);\n            case ASSIGN_CHEST -> MinionManager.assignReturnContainer(player, target, arg0 != 0);\n            case STOP_WORK -> MinionManager.stopWork(player);\n',
+              'payload cases')
+          s = replace_once(s,
+              '        MOVE,\n        DIG_STAIRWELL,\n',
+              '        MOVE,\n        ASSIGN_CHEST,\n        STOP_WORK,\n        DIG_STAIRWELL,\n',
+              'payload enum')
+          p.write_text(s)
+
+          # Selection: expose direct world-target commands from the menu.
+          Path('src/main/java/atomicstryker/minions/client/MinionSelection.java').write_text(r'''package atomicstryker.minions.client;
+
+import atomicstryker.minions.network.MinionCommandPayload;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.neoforged.neoforge.network.PacketDistributor;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public final class MinionSelection {
+    public enum Mode {
+        NONE,
+        MINESHAFT,
+        STRIP_MINE,
+        CUSTOM,
+        MOVE,
+        CHOP_TREE,
+        MINE_VEIN,
+        ASSIGN_CHEST
+    }
+
+    private static Mode mode = Mode.NONE;
+    private static BlockPos target;
+    private static int customSizeXZ = 3;
+    private static int customSizeY = 3;
+
+    private MinionSelection() {
+    }
+
+    public static void start(Mode newMode) {
+        mode = newMode;
+        target = null;
+    }
+
+    public static void startCustom(int xzSize, int ySize) {
+        customSizeXZ = clampOdd(xzSize, 3, 71);
+        customSizeY = Math.max(3, Math.min(25, ySize));
+        start(Mode.CUSTOM);
+    }
+
+    public static void clear() {
+        mode = Mode.NONE;
+        target = null;
+    }
+
+    public static boolean isActive() {
+        return mode != Mode.NONE;
+    }
+
+    public static Mode mode() {
+        return mode;
+    }
+
+    public static int customSizeXZ() {
+        return customSizeXZ;
+    }
+
+    public static int customSizeY() {
+        return customSizeY;
+    }
+
+    public static BlockPos target() {
+        return target;
+    }
+
+    public static void updateFromCrosshair() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.hitResult instanceof BlockHitResult blockHit) {
+            target = mode == Mode.MOVE
+                    ? blockHit.getBlockPos().relative(blockHit.getDirection()).immutable()
+                    : blockHit.getBlockPos().immutable();
+        }
+    }
+
+    public static boolean confirm() {
+        if (target == null || mode == Mode.NONE) {
+            return false;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        int sneaking = minecraft.player != null && minecraft.player.isShiftKeyDown() ? 1 : 0;
+        MinionCommandPayload payload = switch (mode) {
+            case MINESHAFT -> new MinionCommandPayload(MinionCommandPayload.Command.DIG_STAIRWELL, target);
+            case STRIP_MINE -> new MinionCommandPayload(MinionCommandPayload.Command.STRIP_MINE, target);
+            case CUSTOM -> new MinionCommandPayload(MinionCommandPayload.Command.CUSTOM_DIG, target, customSizeXZ, customSizeY);
+            case MOVE -> new MinionCommandPayload(MinionCommandPayload.Command.MOVE, target);
+            case CHOP_TREE -> new MinionCommandPayload(MinionCommandPayload.Command.CHOP_TREE, target);
+            case MINE_VEIN -> new MinionCommandPayload(MinionCommandPayload.Command.MINE_VEIN, target);
+            case ASSIGN_CHEST -> new MinionCommandPayload(MinionCommandPayload.Command.ASSIGN_CHEST, target, sneaking, 0);
+            case NONE -> null;
+        };
+        if (payload == null) {
+            return false;
+        }
+        PacketDistributor.sendToServer(payload);
+        clear();
+        return true;
+    }
+
+    public static AABB mainBox() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (target == null || minecraft.player == null) {
+            return null;
+        }
+
+        Direction direction = directionFromPlayer(target);
+        return switch (mode) {
+            case MINESHAFT -> new AABB(
+                    target.getX(), target.getY(), target.getZ(),
+                    target.getX() + 5.0D, target.getY() + 1.0D, target.getZ() + 5.0D
+            );
+            case STRIP_MINE -> boxBetween(target, target.relative(direction, 2).above());
+            case CUSTOM -> customBox(target, direction, customSizeXZ, customSizeY);
+            case MOVE, CHOP_TREE, MINE_VEIN, ASSIGN_CHEST -> new AABB(target);
+            case NONE -> null;
+        };
+    }
+
+    public static List<AABB> helperBoxes() {
+        List<AABB> boxes = new ArrayList<>();
+        if (target == null || mode != Mode.MINESHAFT) {
+            return boxes;
+        }
+        for (int i = 1; i <= 3; i++) {
+            BlockPos p = target.offset(i, -i, 0);
+            boxes.add(new AABB(p));
+        }
+        return boxes;
+    }
+
+    public static Direction directionFromPlayer(BlockPos start) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) {
+            return Direction.NORTH;
+        }
+        int bossX = minecraft.player.blockPosition().getX();
+        int bossZ = minecraft.player.blockPosition().getZ();
+        int dx = start.getX() - bossX;
+        int dz = start.getZ() - bossZ;
+        if (Math.abs(dx) > Math.abs(dz)) {
+            return dx > 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static AABB customBox(BlockPos start, Direction direction, int size, int height) {
+        int half = (size - 1) / 2;
+        int minX;
+        int maxX;
+        int minZ;
+        int maxZ;
+
+        if (direction.getAxis() == Direction.Axis.X) {
+            minX = direction == Direction.EAST ? start.getX() : start.getX() - (size - 1);
+            maxX = minX + size - 1;
+            minZ = start.getZ() - half;
+            maxZ = start.getZ() + half;
+        } else {
+            minZ = direction == Direction.SOUTH ? start.getZ() : start.getZ() - (size - 1);
+            maxZ = minZ + size - 1;
+            minX = start.getX() - half;
+            maxX = start.getX() + half;
+        }
+
+        return new AABB(minX, start.getY(), minZ, maxX + 1.0D, start.getY() + height, maxZ + 1.0D);
+    }
+
+    private static AABB boxBetween(BlockPos a, BlockPos b) {
+        int minX = Math.min(a.getX(), b.getX());
+        int minY = Math.min(a.getY(), b.getY());
+        int minZ = Math.min(a.getZ(), b.getZ());
+        int maxX = Math.max(a.getX(), b.getX()) + 1;
+        int maxY = Math.max(a.getY(), b.getY()) + 1;
+        int maxZ = Math.max(a.getZ(), b.getZ()) + 1;
+        return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    private static int clampOdd(int value, int min, int max) {
+        int result = Math.max(min, Math.min(max, value));
+        if ((result & 1) == 0) {
+            result = Math.min(max, result + 1);
+        }
+        return result;
+    }
+}
+''')
+
+          # Full order menu: expose everything that otherwise only exists as a staff gesture.
+          Path('src/main/java/atomicstryker/minions/client/gui/MinionOrdersScreen.java').write_text(r'''package atomicstryker.minions.client.gui;
+
+import atomicstryker.minions.client.MinionSelection;
+import atomicstryker.minions.network.MinionCommandPayload;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.neoforged.neoforge.network.PacketDistributor;
+
+public final class MinionOrdersScreen extends Screen {
+    private final Screen parent;
+
+    public MinionOrdersScreen(Screen parent) {
+        super(Component.translatable("screen.minions.orders"));
+        this.parent = parent;
+    }
+
+    @Override
+    protected void init() {
+        int left = width / 2 - 205;
+        int right = width / 2 + 5;
+        int y = Math.max(55, height / 4 - 5);
+        int row = 30;
+
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.follow"),
+                b -> sendAndClose(MinionCommandPayload.Command.FOLLOW)).bounds(left, y, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.move"),
+                b -> startSelection(MinionSelection.Mode.MOVE)).bounds(left, y + row, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.choptree"),
+                b -> startSelection(MinionSelection.Mode.CHOP_TREE)).bounds(left, y + row * 2, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.minevein"),
+                b -> startSelection(MinionSelection.Mode.MINE_VEIN)).bounds(left, y + row * 3, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.chest"),
+                b -> startSelection(MinionSelection.Mode.ASSIGN_CHEST)).bounds(left, y + row * 4, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.drop"),
+                b -> sendAndClose(MinionCommandPayload.Command.DROP_ITEMS)).bounds(left, y + row * 5, 200, 20).build());
+
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.stop"),
+                b -> sendAndClose(MinionCommandPayload.Command.STOP_WORK)).bounds(right, y, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.unsummon"),
+                b -> sendAndClose(MinionCommandPayload.Command.UNSUMMON)).bounds(right, y + row, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.mineshaft"),
+                b -> startSelection(MinionSelection.Mode.MINESHAFT)).bounds(right, y + row * 2, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.stripmine"),
+                b -> startSelection(MinionSelection.Mode.STRIP_MINE)).bounds(right, y + row * 3, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.customdig_short"),
+                b -> minecraft.setScreen(new CustomDigScreen(this))).bounds(right, y + row * 4, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.nevermind"),
+                b -> minecraft.setScreen(parent)).bounds(right, y + row * 5, 200, 20).build());
+    }
+
+    private void startSelection(MinionSelection.Mode mode) {
+        MinionSelection.start(mode);
+        minecraft.setScreen(null);
+    }
+
+    private void sendAndClose(MinionCommandPayload.Command command) {
+        PacketDistributor.sendToServer(new MinionCommandPayload(command, BlockPos.ZERO));
+        minecraft.setScreen(null);
+    }
+
+    @Override
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        renderBackground(graphics, mouseX, mouseY, partialTick);
+        graphics.drawCenteredString(font, title, width / 2, 32, 0xFFFFFF);
+        super.render(graphics, mouseX, mouseY, partialTick);
+    }
+}
+''')
+
+          # Staff chest semantics: normal click interrupts and returns goods; sneak only assigns chest.
+          p = Path('src/main/java/atomicstryker/minions/common/item/MastersStaffItem.java')
+          s = p.read_text()
+          old = '''        if (blockEntity instanceof Container && MinionManager.hasMinions(player)) {
+            for (MinionEntity minion : MinionManager.getOwned(player)) {
+                minion.setReturnContainer(clicked);
+            }
+            level.playSound(null, clicked, MinionsSounds.RANDOM_ORDER.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
+            player.displayClientMessage(Component.translatable("message.minions.chest"), true);
+            return;
+        }
+'''
+          new = '''        if (blockEntity instanceof Container && MinionManager.hasMinions(player)) {
+            MinionManager.assignReturnContainer(player, clicked, player.isShiftKeyDown());
+            player.displayClientMessage(Component.translatable("message.minions.chest"), true);
+            return;
+        }
+'''
+          s = replace_once(s, old, new, 'staff chest behavior')
+          p.write_text(s)
+
+          # Manager: hard stop, chest workflow, strip worker takeover and phase barriers.
+          p = Path('src/main/java/atomicstryker/minions/common/MinionManager.java')
+          s = p.read_text()
+          follow_marker = '''    public static void follow(ServerPlayer player) {
+        for (MinionEntity minion : getOwned(player)) {
+            minion.clearWork();
+            minion.clearMoveTarget();
+            minion.setFollowing(true);
+        }
+        playOrder(player, MinionsSounds.ORDER_FOLLOW_PLAYER.get());
+    }
+'''
+          follow_new = follow_marker + '''
+    public static void stopWork(ServerPlayer player) {
+        for (MinionEntity minion : getOwned(player)) {
+            minion.clearWork();
+            minion.clearMoveTarget();
+            minion.setFollowing(false);
+        }
+        playOrder(player, MinionsSounds.RANDOM_ORDER.get());
+    }
+
+    public static void assignReturnContainer(ServerPlayer player, BlockPos target, boolean preserveCurrentJob) {
+        if (!(player.serverLevel().getBlockEntity(target) instanceof net.minecraft.world.Container)) {
+            return;
+        }
+        for (MinionEntity minion : getOwned(player)) {
+            if (!preserveCurrentJob) {
+                minion.clearWork();
+                minion.clearMoveTarget();
+                minion.setFollowing(false);
+            }
+            minion.setReturnContainer(target, !preserveCurrentJob);
+        }
+        playOrder(player, MinionsSounds.RANDOM_ORDER.get());
+    }
+
+    public static boolean canWorkPhase(UUID owner, int phase) {
+        if (owner == null || phase <= 0) {
+            return true;
+        }
+        LOADED_MINIONS.removeIf(entity -> entity.isRemoved() || !entity.isAlive());
+        for (MinionEntity minion : LOADED_MINIONS) {
+            if (!owner.equals(minion.getOwnerUUID())) {
+                continue;
+            }
+            int lowest = minion.lowestQueuedPhase();
+            if (lowest >= 0 && lowest < phase) {
+                return false;
+            }
+        }
+        return true;
+    }
+'''
+          s = replace_once(s, follow_marker, follow_new, 'manager controls')
+
+          s = replace_once(s,
+              '        MinionEntity worker = minions.stream().filter(minion -> minion.queuedWork() == 0).findFirst().orElse(null);\n',
+              '        MinionEntity worker = minions.stream().filter(minion -> !minion.isStripMining()).findFirst().orElse(null);\n',
+              'strip worker selection')
+          s = replace_once(s,
+              '        worker.clearMoveTarget();\n\n        for (int step = 0; step < length; step++) {\n',
+              '        worker.clearMoveTarget();\n        worker.setStripMining(true);\n\n        for (int step = 0; step < length; step++) {\n',
+              'strip flag')
+
+          # custom dig exact layer phases, top-down.
+          s = s.replace('work.add(QueuedWork.breakBlock(start));', 'work.add(QueuedWork.breakBlock(start, 0));', 1)
+          s = s.replace('work.add(QueuedWork.breakBlock(start.above()));', 'work.add(QueuedWork.breakBlock(start.above(), 0));', 1)
+          s = s.replace('work.add(QueuedWork.breakBlock(start.above(2)));', 'work.add(QueuedWork.breakBlock(start.above(2), 0));', 1)
+          custom_old = '''        for (int y = maxY; y >= minY; y--) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int x = minX; x <= maxX; x++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    if (!player.serverLevel().getBlockState(pos).isAir()) {
+                        work.add(QueuedWork.breakBlock(pos));
+                    }
+                }
+            }
+        }
+'''
+          custom_new = '''        for (int y = maxY; y >= minY; y--) {
+            int phase = (maxY - y) + 1;
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int x = minX; x <= maxX; x++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    if (!player.serverLevel().getBlockState(pos).isAir()) {
+                        work.add(QueuedWork.breakBlock(pos, phase));
+                    }
+                }
+            }
+        }
+'''
+          s = replace_once(s, custom_old, custom_new, 'custom layer phases')
+
+          # stairwell: one depth phase at a time.
+          s = s.replace('work.add(QueuedWork.placeCobble(pos));', 'work.add(QueuedWork.placeCobble(pos, depth + 1));')
+          s = s.replace('work.add(QueuedWork.placeStair(pos, stairFacing));', 'work.add(QueuedWork.placeStair(pos, stairFacing, depth + 1));')
+          s = s.replace('work.add(QueuedWork.breakBlock(pos));', 'work.add(QueuedWork.breakBlock(pos, depth + 1));', 1)
+
+          strip_loop_old = '''        for (int step = 0; step < length; step++) {
+            BlockPos base = start.relative(forward, step);
+            queueBreak(worker, queued, base);
+            queueBreak(worker, queued, base.above());
+
+            if (level.getBlockState(base.below()).isAir()) {
+                worker.enqueuePlaceDirt(base.below());
+            }
+
+            scanValuableVein(level, worker, queued, base.above(2));
+            scanValuableVein(level, worker, queued, base.relative(side));
+            scanValuableVein(level, worker, queued, base.relative(side.getOpposite()));
+            scanValuableVein(level, worker, queued, base.above().relative(side));
+            scanValuableVein(level, worker, queued, base.above().relative(side.getOpposite()));
+            scanValuableVein(level, worker, queued, base.below());
+
+            if (step > 0 && step % 7 == 0) {
+                worker.enqueuePlaceTorch(base.relative(forward.getOpposite(), 2));
+            }
+        }
+'''
+          strip_loop_new = '''        for (int step = 0; step < length; step++) {
+            int phase = step + 1;
+            BlockPos base = start.relative(forward, step);
+            queueBreak(worker, queued, base, phase);
+            queueBreak(worker, queued, base.above(), phase);
+
+            if (level.getBlockState(base.below()).isAir()) {
+                worker.enqueuePlaceDirt(base.below(), phase);
+            }
+
+            scanValuableVein(level, worker, queued, base.above(2), phase);
+            scanValuableVein(level, worker, queued, base.relative(side), phase);
+            scanValuableVein(level, worker, queued, base.relative(side.getOpposite()), phase);
+            scanValuableVein(level, worker, queued, base.above().relative(side), phase);
+            scanValuableVein(level, worker, queued, base.above().relative(side.getOpposite()), phase);
+            scanValuableVein(level, worker, queued, base.below(), phase);
+
+            if (step > 0 && step % 7 == 0) {
+                worker.enqueuePlaceTorch(base.relative(forward.getOpposite(), 2), phase);
+            }
+        }
+'''
+          s = replace_once(s, strip_loop_old, strip_loop_new, 'strip segment phases')
+
+          s = replace_once(s,
+              '''    private static void scanValuableVein(ServerLevel level, MinionEntity worker, Set<BlockPos> queued, BlockPos start) {
+        if (!isValuable(level, start)) {
+            return;
+        }
+        for (BlockPos pos : floodMatching(level, start, Math.min(64, MinionsConfig.MAX_VEIN_BLOCKS.get()), false)) {
+            queueBreak(worker, queued, pos);
+        }
+    }
+
+    private static void queueBreak(MinionEntity worker, Set<BlockPos> queued, BlockPos pos) {
+        if (queued.add(pos.immutable())) {
+            worker.enqueueWork(pos);
+        }
+    }
+''',
+              '''    private static void scanValuableVein(ServerLevel level, MinionEntity worker, Set<BlockPos> queued, BlockPos start, int phase) {
+        if (!isValuable(level, start)) {
+            return;
+        }
+        for (BlockPos pos : floodMatching(level, start, Math.min(64, MinionsConfig.MAX_VEIN_BLOCKS.get()), false)) {
+            queueBreak(worker, queued, pos, phase);
+        }
+    }
+
+    private static void queueBreak(MinionEntity worker, Set<BlockPos> queued, BlockPos pos, int phase) {
+        if (queued.add(pos.immutable())) {
+            worker.enqueueWork(pos, phase);
+        }
+    }
+''',
+              'strip helpers')
+
+          assign_old = '''        int index = 0;
+        for (QueuedWork order : orders) {
+            MinionEntity worker = minions.get(index++ % minions.size());
+            switch (order.action) {
+                case BREAK -> worker.enqueueWork(order.pos);
+                case COBBLE -> worker.enqueuePlaceCobble(order.pos);
+                case DIRT -> worker.enqueuePlaceDirt(order.pos);
+                case STAIR -> worker.enqueuePlaceStair(order.pos, order.facing);
+                case TORCH -> worker.enqueuePlaceTorch(order.pos);
+            }
+        }
+'''
+          assign_new = '''        int index = 0;
+        for (QueuedWork order : orders) {
+            MinionEntity worker = minions.get(index++ % minions.size());
+            switch (order.action) {
+                case BREAK -> worker.enqueueWork(order.pos, order.phase);
+                case COBBLE -> worker.enqueuePlaceCobble(order.pos, order.phase);
+                case DIRT -> worker.enqueuePlaceDirt(order.pos, order.phase);
+                case STAIR -> worker.enqueuePlaceStair(order.pos, order.facing, order.phase);
+                case TORCH -> worker.enqueuePlaceTorch(order.pos, order.phase);
+            }
+        }
+'''
+          s = replace_once(s, assign_old, assign_new, 'phase-aware assignment')
+
+          q_old = '''    private record QueuedWork(BlockPos pos, OrderAction action, Direction facing) {
+        private static QueuedWork breakBlock(BlockPos pos) {
+            return new QueuedWork(pos.immutable(), OrderAction.BREAK, null);
+        }
+
+        private static QueuedWork placeCobble(BlockPos pos) {
+            return new QueuedWork(pos.immutable(), OrderAction.COBBLE, null);
+        }
+
+        private static QueuedWork placeStair(BlockPos pos, Direction facing) {
+            return new QueuedWork(pos.immutable(), OrderAction.STAIR, facing);
+        }
+    }
+'''
+          q_new = '''    private record QueuedWork(BlockPos pos, OrderAction action, Direction facing, int phase) {
+        private static QueuedWork breakBlock(BlockPos pos) {
+            return breakBlock(pos, 0);
+        }
+
+        private static QueuedWork breakBlock(BlockPos pos, int phase) {
+            return new QueuedWork(pos.immutable(), OrderAction.BREAK, null, phase);
+        }
+
+        private static QueuedWork placeCobble(BlockPos pos, int phase) {
+            return new QueuedWork(pos.immutable(), OrderAction.COBBLE, null, phase);
+        }
+
+        private static QueuedWork placeStair(BlockPos pos, Direction facing, int phase) {
+            return new QueuedWork(pos.immutable(), OrderAction.STAIR, facing, phase);
+        }
+    }
+'''
+          s = replace_once(s, q_old, q_new, 'queued work record')
+          p.write_text(s)
+
+          # Entity: timed animated work, virtual tools, full backpack return/resume, 10s item age,
+          # orphan despawn, strip cancellation state and layer barriers.
+          p = Path('src/main/java/atomicstryker/minions/common/entity/MinionEntity.java')
+          s = p.read_text()
+          s = replace_once(s,
+              'import atomicstryker.minions.registry.MinionsSounds;\n',
+              'import atomicstryker.minions.common.MinionManager;\nimport atomicstryker.minions.common.MinionsConfig;\nimport atomicstryker.minions.registry.MinionsSounds;\n',
+              'entity imports mod')
+          s = replace_once(s,
+              'import net.minecraft.sounds.SoundEvent;\n',
+              'import net.minecraft.sounds.SoundEvent;\nimport net.minecraft.sounds.SoundSource;\nimport net.minecraft.sounds.SoundType;\n',
+              'entity imports sounds')
+          s = replace_once(s,
+              'import net.minecraft.world.entity.EntityType;\n',
+              'import net.minecraft.world.entity.EntityType;\nimport net.minecraft.world.entity.EquipmentSlot;\n',
+              'entity equipment import')
+          s = replace_once(s,
+              'import net.minecraft.world.entity.LivingEntity;\n',
+              'import net.minecraft.world.entity.LivingEntity;\nimport net.minecraft.world.InteractionHand;\n',
+              'entity hand import')
+          s = replace_once(s,
+              'import net.minecraft.world.item.ItemStack;\n',
+              'import net.minecraft.world.item.ItemStack;\nimport net.minecraft.world.item.Items;\nimport net.minecraft.tags.BlockTags;\n',
+              'entity item imports')
+          s = replace_once(s,
+              '''    private int pickupCooldown;
+    private int pickupDisabledTicks;
+''',
+              '''    private int pickupCooldown;
+    private int pickupDisabledTicks;
+    private int ownerMissingTicks;
+    private int workTicks;
+    private boolean inventoryFull;
+    private boolean forceReturnGoods;
+    private boolean stripMining;
+    private WorkOrder activeOrder;
+''',
+              'entity fields')
+          s = replace_once(s,
+              '''    public MinionEntity(EntityType<? extends MinionEntity> entityType, Level level) {
+        super(entityType, level);
+        setPersistenceRequired();
+    }
+''',
+              '''    public MinionEntity(EntityType<? extends MinionEntity> entityType, Level level) {
+        super(entityType, level);
+        setPersistenceRequired();
+        setDropChance(EquipmentSlot.MAINHAND, 0.0F);
+    }
+''',
+              'entity constructor')
+
+          enqueue_old = '''    public void enqueueWork(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.BREAK, null));
+    }
+
+    public void enqueueTreeWork(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.TREE_BREAK, null));
+    }
+
+    public void enqueuePlaceCobble(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_COBBLE, null));
+    }
+
+    public void enqueuePlaceDirt(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_DIRT, null));
+    }
+
+    public void enqueuePlaceStair(BlockPos pos, Direction facing) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_STAIR, facing));
+    }
+
+    public void enqueuePlaceTorch(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_TORCH, null));
+    }
+'''
+          enqueue_new = '''    public void enqueueWork(BlockPos pos) {
+        enqueueWork(pos, 0);
+    }
+
+    public void enqueueWork(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.BREAK, null, phase));
+    }
+
+    public void enqueueTreeWork(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.TREE_BREAK, null, 0));
+    }
+
+    public void enqueuePlaceCobble(BlockPos pos) {
+        enqueuePlaceCobble(pos, 0);
+    }
+
+    public void enqueuePlaceCobble(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_COBBLE, null, phase));
+    }
+
+    public void enqueuePlaceDirt(BlockPos pos) {
+        enqueuePlaceDirt(pos, 0);
+    }
+
+    public void enqueuePlaceDirt(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_DIRT, null, phase));
+    }
+
+    public void enqueuePlaceStair(BlockPos pos, Direction facing) {
+        enqueuePlaceStair(pos, facing, 0);
+    }
+
+    public void enqueuePlaceStair(BlockPos pos, Direction facing, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_STAIR, facing, phase));
+    }
+
+    public void enqueuePlaceTorch(BlockPos pos) {
+        enqueuePlaceTorch(pos, 0);
+    }
+
+    public void enqueuePlaceTorch(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_TORCH, null, phase));
+    }
+'''
+          s = replace_once(s, enqueue_old, enqueue_new, 'entity enqueue overloads')
+
+          s = replace_once(s,
+              '''    public void clearWork() {
+        workQueue.clear();
+        entityData.set(WORKING, false);
+        navigation.stop();
+    }
+
+    public int queuedWork() {
+        return workQueue.size();
+    }
+''',
+              '''    public void clearWork() {
+        workQueue.clear();
+        stripMining = false;
+        forceReturnGoods = false;
+        resetActiveWork();
+        entityData.set(WORKING, false);
+        navigation.stop();
+        setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+    }
+
+    public int queuedWork() {
+        return workQueue.size();
+    }
+
+    public int lowestQueuedPhase() {
+        return workQueue.stream().mapToInt(WorkOrder::phase).min().orElse(-1);
+    }
+
+    public boolean isStripMining() {
+        return stripMining;
+    }
+
+    public void setStripMining(boolean value) {
+        stripMining = value;
+    }
+''',
+              'entity clear/strip phase')
+
+          s = replace_once(s,
+              '''    public void setReturnContainer(BlockPos pos) {
+        returnContainer = pos == null ? null : pos.immutable();
+    }
+''',
+              '''    public void setReturnContainer(BlockPos pos) {
+        setReturnContainer(pos, false);
+    }
+
+    public void setReturnContainer(BlockPos pos, boolean returnImmediately) {
+        returnContainer = pos == null ? null : pos.immutable();
+        if (returnImmediately && !inventory.isEmpty()) {
+            forceReturnGoods = true;
+        }
+    }
+''',
+              'entity chest setter')
+
+          # clear flags after dumping.
+          s = replace_once(s,
+              '        pickupDisabledTicks = 60; // legacy blockItemPickUp(): three seconds\n',
+              '        pickupDisabledTicks = 60; // legacy blockItemPickUp(): three seconds\n        inventoryFull = false;\n        forceReturnGoods = false;\n',
+              'drop toward flags')
+          s = replace_once(s,
+              '        pickupDisabledTicks = 60;\n        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {\n',
+              '        pickupDisabledTicks = 60;\n        inventoryFull = false;\n        forceReturnGoods = false;\n        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {\n',
+              'drop flags')
+
+          # Replace tick and work engine as one contiguous region.
+          pattern = re.compile(r'    @Override\n    public void tick\(\) \{.*?\n    private BlockState desiredState\(WorkOrder order\) \{', re.S)
+          replacement = r'''    @Override
+    public void tick() {
+        super.tick();
+        if (!(level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        tickOwnerDespawn(serverLevel);
+        if (isRemoved()) {
+            return;
+        }
+
+        if (pickupDisabledTicks > 0) {
+            pickupDisabledTicks--;
+        } else if (pickupCooldown-- <= 0) {
+            pickupCooldown = 10;
+            collectNearbyItems(serverLevel);
+        }
+
+        if ((inventoryFull || forceReturnGoods) && !inventory.isEmpty()) {
+            if (tickInventoryReturn(serverLevel)) {
+                return;
+            }
+        }
+
+        if (!workQueue.isEmpty()) {
+            tickWork(serverLevel);
+        } else {
+            resetActiveWork();
+            entityData.set(WORKING, false);
+            stripMining = false;
+            setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+            if (carryTargetUUID != null) {
+                tickCarryTarget(serverLevel);
+            } else if (!inventory.isEmpty() && (returnContainer != null || forceReturnGoods)) {
+                tickInventoryReturn(serverLevel);
+            } else if (followingMaster) {
+                tickFollow(serverLevel);
+            } else if (moveTarget != null) {
+                tickMoveTarget(serverLevel);
+            }
+        }
+    }
+
+    private void tickOwnerDespawn(ServerLevel level) {
+        ServerPlayer owner = getOwner(level);
+        if (owner != null && owner.isAlive()) {
+            ownerMissingTicks = 0;
+            return;
+        }
+
+        ownerMissingTicks++;
+        int delayTicks = MinionsConfig.AUTOMATIC_DESPAWN_DELAY.get() * 20;
+        if (ownerMissingTicks >= delayTicks) {
+            dropStoredItems();
+            discard();
+        }
+    }
+
+    private void tickWork(ServerLevel level) {
+        WorkOrder order = workQueue.peek();
+        if (order == null) {
+            entityData.set(WORKING, false);
+            return;
+        }
+        if (order.phase() > 0 && !MinionManager.canWorkPhase(ownerUUID, order.phase())) {
+            entityData.set(WORKING, false);
+            navigation.stop();
+            return;
+        }
+
+        if (activeOrder != order) {
+            resetActiveWork();
+            activeOrder = order;
+            workTicks = 0;
+        }
+
+        BlockPos target = order.pos();
+        BlockState state = level.getBlockState(target);
+        if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
+            if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
+                completeCurrentOrder(level);
+                return;
+            }
+        } else {
+            BlockState desired = desiredState(order);
+            if (desired == null) {
+                completeCurrentOrder(level);
+                return;
+            }
+            if (state.equals(desired)) {
+                completeCurrentOrder(level);
+                return;
+            }
+            if (!state.isAir() && state.getDestroySpeed(level, target) < 0.0F) {
+                completeCurrentOrder(level);
+                return;
+            }
+        }
+
+        double distance = distanceToSqr(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
+        double workReachSq = order.action() == WorkAction.TREE_BREAK ? 256.0D : 9.0D;
+        if (distance <= workReachSq) {
+            navigation.stop();
+            entityData.set(WORKING, true);
+            getLookControl().setLookAt(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
+            adaptWorkingTool(state, order.action());
+
+            int requiredTicks = (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK)
+                    ? MinionsConfig.WORK_TICKS_PER_BLOCK.get()
+                    : Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
+            workTicks++;
+
+            if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
+                int crack = Math.min(9, (workTicks * 10) / Math.max(1, requiredTicks));
+                level.destroyBlockProgress(getId(), target, crack);
+                if (workTicks == 1 || workTicks % 6 == 0) {
+                    swing(InteractionHand.MAIN_HAND);
+                    SoundType soundType = state.getSoundType();
+                    level.playSound(null, target, soundType.getHitSound(), SoundSource.BLOCKS,
+                            Math.max(0.1F, soundType.getVolume() * 0.35F), soundType.getPitch());
+                }
+            } else if (workTicks == 1) {
+                swing(InteractionHand.MAIN_HAND);
+            }
+
+            if (workTicks < requiredTicks) {
+                return;
+            }
+
+            level.destroyBlockProgress(getId(), target, -1);
+            if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
+                level.destroyBlock(target, true, this);
+            } else {
+                if (!state.isAir()) {
+                    level.destroyBlock(target, true, this);
+                }
+                BlockState desired = desiredState(order);
+                if (desired != null && desired.canSurvive(level, target)) {
+                    level.setBlock(target, desired, 3);
+                }
+            }
+
+            completeCurrentOrder(level);
+            return;
+        }
+
+        entityData.set(WORKING, false);
+        if (workTicks > 0) {
+            level.destroyBlockProgress(getId(), target, -1);
+            workTicks = 0;
+        }
+        adaptWorkingTool(state, order.action());
+        boolean navigating = navigation.moveTo(target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D, 1.15D);
+        if (!navigating) {
+            stuckTicks++;
+            if (stuckTicks > 80) {
+                BlockPos safe = findSafeTeleport(level, target);
+                teleportTo(safe.getX() + 0.5D, safe.getY(), safe.getZ() + 0.5D);
+                stuckTicks = 0;
+            }
+        } else {
+            stuckTicks = Math.max(0, stuckTicks - 1);
+        }
+    }
+
+    private void adaptWorkingTool(BlockState state, WorkAction action) {
+        if (action != WorkAction.BREAK && action != WorkAction.TREE_BREAK) {
+            return;
+        }
+        ItemStack wanted;
+        if (action == WorkAction.TREE_BREAK || state.is(BlockTags.MINEABLE_WITH_AXE)) {
+            wanted = new ItemStack(Items.IRON_AXE);
+        } else if (state.is(BlockTags.MINEABLE_WITH_SHOVEL)) {
+            wanted = new ItemStack(Items.IRON_SHOVEL);
+        } else {
+            wanted = new ItemStack(Items.IRON_PICKAXE);
+        }
+        ItemStack held = getMainHandItem();
+        if (!ItemStack.isSameItemSameComponents(held, wanted)) {
+            setItemInHand(InteractionHand.MAIN_HAND, wanted);
+        }
+    }
+
+    private void completeCurrentOrder(ServerLevel level) {
+        if (activeOrder != null) {
+            level.destroyBlockProgress(getId(), activeOrder.pos(), -1);
+        }
+        workQueue.poll();
+        activeOrder = null;
+        workTicks = 0;
+        stuckTicks = 0;
+        entityData.set(WORKING, false);
+        if (workQueue.isEmpty()) {
+            stripMining = false;
+            if (!inventory.isEmpty()) {
+                forceReturnGoods = true;
+            }
+        }
+    }
+
+    private void resetActiveWork() {
+        if (activeOrder != null && level() instanceof ServerLevel serverLevel) {
+            serverLevel.destroyBlockProgress(getId(), activeOrder.pos(), -1);
+        }
+        activeOrder = null;
+        workTicks = 0;
+    }
+
+    private BlockState desiredState(WorkOrder order) {'''
+          s2, n = pattern.subn(replacement, s, count=1)
+          if n != 1:
+              raise SystemExit(f'tickWork region replacement count {n}')
+          s = s2
+
+          # Replace old chest-only return method with full backpack return/resume behavior.
+          pattern = re.compile(r'    private void tickReturnToContainer\(ServerLevel level\) \{.*?\n    private void collectNearbyItems\(ServerLevel level\) \{', re.S)
+          replacement = r'''    private boolean tickInventoryReturn(ServerLevel level) {
+        if (inventory.isEmpty()) {
+            inventoryFull = false;
+            forceReturnGoods = false;
+            return false;
+        }
+
+        if (returnContainer != null) {
+            BlockEntity blockEntity = level.getBlockEntity(returnContainer);
+            if (!(blockEntity instanceof Container container)) {
+                returnContainer = null;
+            } else {
+                if (distanceToSqr(returnContainer.getX() + 0.5D, returnContainer.getY() + 0.5D, returnContainer.getZ() + 0.5D) > 9.0D) {
+                    navigation.moveTo(returnContainer.getX() + 0.5D, returnContainer.getY(), returnContainer.getZ() + 0.5D, 1.15D);
+                    return true;
+                }
+
+                for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                    ItemStack carried = inventory.getItem(slot);
+                    if (carried.isEmpty()) {
+                        continue;
+                    }
+                    ItemStack remaining = carried.copy();
+                    for (int targetSlot = 0; targetSlot < container.getContainerSize() && !remaining.isEmpty(); targetSlot++) {
+                        ItemStack existing = container.getItem(targetSlot);
+                        if (existing.isEmpty()) {
+                            container.setItem(targetSlot, remaining.copy());
+                            remaining = ItemStack.EMPTY;
+                        } else if (ItemStack.isSameItemSameComponents(existing, remaining) && existing.getCount() < existing.getMaxStackSize()) {
+                            int moved = Math.min(remaining.getCount(), existing.getMaxStackSize() - existing.getCount());
+                            existing.grow(moved);
+                            remaining.shrink(moved);
+                            container.setItem(targetSlot, existing);
+                        }
+                    }
+                    inventory.setItem(slot, remaining);
+                }
+                container.setChanged();
+                if (inventory.isEmpty()) {
+                    inventoryFull = false;
+                    forceReturnGoods = false;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        ServerPlayer owner = getOwner(level);
+        if (owner == null) {
+            navigation.stop();
+            return true;
+        }
+        if (distanceToSqr(owner) > 9.0D) {
+            navigation.moveTo(owner, 1.15D);
+            return true;
+        }
+        navigation.stop();
+        dropStoredItemsToward(owner);
+        return false;
+    }
+
+    private void collectNearbyItems(ServerLevel level) {'''
+          s2, n = pattern.subn(replacement, s, count=1)
+          if n != 1:
+              raise SystemExit(f'inventory return replacement count {n}')
+          s = s2
+
+          # 10 second age gate and full inventory trigger.
+          s = replace_once(s,
+              '''        for (ItemEntity itemEntity : items) {
+            ItemStack stack = itemEntity.getItem();
+            if (stack.isEmpty()) {
+                continue;
+            }
+            ItemStack remaining = inventory.addItem(stack.copy());
+            int accepted = stack.getCount() - remaining.getCount();
+            if (accepted <= 0) {
+                continue;
+            }
+            if (remaining.isEmpty()) {
+                itemEntity.discard();
+            } else {
+                itemEntity.setItem(remaining);
+            }
+        }
+''',
+              '''        for (ItemEntity itemEntity : items) {
+            if (itemEntity.tickCount <= 200) {
+                continue;
+            }
+            ItemStack stack = itemEntity.getItem();
+            if (stack.isEmpty()) {
+                continue;
+            }
+            ItemStack remaining = inventory.addItem(stack.copy());
+            int accepted = stack.getCount() - remaining.getCount();
+            if (accepted <= 0) {
+                inventoryFull = true;
+                break;
+            }
+            if (remaining.isEmpty()) {
+                itemEntity.discard();
+            } else {
+                itemEntity.setItem(remaining);
+                inventoryFull = true;
+                break;
+            }
+        }
+''',
+              'item pickup delay/full')
+
+          # Random minion squeak was incorrectly mapped as ambient sound in the port.
+          s = replace_once(s,
+              '''    @Override
+    protected SoundEvent getAmbientSound() {
+        return MinionsSounds.MINION_SQUEAK.get();
+    }
+''',
+              '''    @Override
+    protected SoundEvent getAmbientSound() {
+        return null;
+    }
+''',
+              'ambient squeak removal')
+
+          # Save new workflow state and phase.
+          s = replace_once(s,
+              '        tag.putBoolean("followingMaster", followingMaster);\n',
+              '        tag.putBoolean("followingMaster", followingMaster);\n        tag.putBoolean("inventoryFull", inventoryFull);\n        tag.putBoolean("forceReturnGoods", forceReturnGoods);\n        tag.putBoolean("stripMining", stripMining);\n        tag.putInt("ownerMissingTicks", ownerMissingTicks);\n',
+              'save flags')
+          s = replace_once(s,
+              '            workTag.putInt("Facing", order.facing() == null ? -1 : order.facing().get3DDataValue());\n',
+              '            workTag.putInt("Facing", order.facing() == null ? -1 : order.facing().get3DDataValue());\n            workTag.putInt("Phase", order.phase());\n',
+              'save phase')
+          s = replace_once(s,
+              '        followingMaster = tag.getBoolean("followingMaster");\n',
+              '        followingMaster = tag.getBoolean("followingMaster");\n        inventoryFull = tag.getBoolean("inventoryFull");\n        forceReturnGoods = tag.getBoolean("forceReturnGoods");\n        stripMining = tag.getBoolean("stripMining");\n        ownerMissingTicks = tag.getInt("ownerMissingTicks");\n',
+              'load flags')
+          s = replace_once(s,
+              '                workQueue.add(new WorkOrder(BlockPos.of(workTag.getLong("Pos")), action, facing));\n',
+              '                workQueue.add(new WorkOrder(BlockPos.of(workTag.getLong("Pos")), action, facing, workTag.contains("Phase") ? workTag.getInt("Phase") : 0));\n',
+              'load phase')
+          s = replace_once(s,
+              '                workQueue.add(new WorkOrder(BlockPos.of(packed), WorkAction.BREAK, null));\n',
+              '                workQueue.add(new WorkOrder(BlockPos.of(packed), WorkAction.BREAK, null, 0));\n',
+              'legacy queue phase')
+          s = replace_once(s,
+              '    public record WorkOrder(BlockPos pos, WorkAction action, Direction facing) {\n',
+              '    public record WorkOrder(BlockPos pos, WorkAction action, Direction facing, int phase) {\n',
+              'work record phase')
+          p.write_text(s)
+
+          # Translation entries for new full order menu.
+          for name, translations in {
+              'en_us.json': {
+                  'screen.minions.move': 'Move Minions',
+                  'screen.minions.chest': 'Assign Return Chest',
+                  'screen.minions.stop': 'Stop Current Work',
+                  'screen.minions.choptree': 'Chop Nearby Trees'
+              },
+              'pl_pl.json': {
+                  'screen.minions.move': 'Przenieś Miniony',
+                  'screen.minions.chest': 'Przypisz skrzynię zwrotną',
+                  'screen.minions.stop': 'Przerwij obecną pracę',
+                  'screen.minions.choptree': 'Ścinaj pobliskie drzewa'
+              }
+          }.items():
+              lp = Path('src/main/resources/assets/minions/lang') / name
+              data = json.loads(lp.read_text())
+              data.update(translations)
+              lp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
+
+          # Version and tracker.
+          gp = Path('gradle.properties')
+          gp.write_text(gp.read_text().replace('mod_version=2.0.3-1.21.1-beta.3', 'mod_version=2.0.3-1.21.1-beta.4'))
+          rp = Path('README.md')
+          rs = rp.read_text().replace('`2.0.3-1.21.1-beta.3`', '`2.0.3-1.21.1-beta.4`')
+          rp.write_text(rs)
+
+          pp = Path('PORTING.md')
+          ps = pp.read_text()
+          marker = '- [x] Item pickup and 24-slot Minion inventory\n'
+          extra = '''- [x] Item pickup and 24-slot Minion inventory
+- [x] Legacy 10-second dropped-item age before Minion pickup
+- [x] Full-backpack return-to-chest/master and automatic job resume
+- [x] Timed one-second block work, crack progress, swing animation and material-aware iron tools
+- [x] Automatic owner-missing despawn timer (legacy 300 second default)
+- [x] Strip-mine worker takeover from another non-strip job and explicit work cancellation
+- [x] Layer/depth phase barriers for orderly excavation instead of scattered vertical digging
+'''
+          if marker in ps:
+              ps = ps.replace(marker, extra, 1)
+          pp.write_text(ps)
+          PY
+      - name: Build patched port
+        run: ./gradlew build --stacktrace
+      - name: Commit patched port
+        shell: bash
+        run: |
+          rm .github/workflows/parity-beta4.yml
+          git config user.name "meynoik"
+          git config user.email "neynoi.k@gmail.com"
+          git add -A
+          git commit -m "Restore animated work and legacy worker workflow"
+          git push origin agent/parity-workflow-beta4

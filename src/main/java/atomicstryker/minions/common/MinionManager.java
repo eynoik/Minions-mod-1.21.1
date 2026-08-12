@@ -8,6 +8,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -90,6 +91,17 @@ public final class MinionManager {
             minion.clearMoveTarget();
             minion.setFollowing(true);
         }
+    }
+
+    public static boolean pickup(ServerPlayer player, LivingEntity target) {
+        return getOwned(player).stream()
+                .filter(minion -> !minion.isVehicle())
+                .min(Comparator.comparingDouble(minion -> minion.distanceToSqr(target)))
+                .map(minion -> {
+                    minion.setCarryTarget(target);
+                    return true;
+                })
+                .orElse(false);
     }
 
     public static void unsummon(ServerPlayer player) {

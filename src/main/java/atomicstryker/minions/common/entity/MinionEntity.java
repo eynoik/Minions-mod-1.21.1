@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
@@ -48,6 +49,7 @@ public final class MinionEntity extends PathfinderMob {
     private boolean followingMaster;
     private BlockPos moveTarget;
     private BlockPos returnContainer;
+    private UUID carryTargetUUID;
     private int stuckTicks;
     private int pickupCooldown;
 
@@ -143,6 +145,19 @@ public final class MinionEntity extends PathfinderMob {
         returnContainer = pos == null ? null : pos.immutable();
     }
 
+    public void setCarryTarget(LivingEntity target) {
+        carryTargetUUID = target == null ? null : target.getUUID();
+        clearWork();
+        followingMaster = false;
+        moveTarget = null;
+    }
+
+    public void dropPassengerAndItems() {
+        ejectPassengers();
+        carryTargetUUID = null;
+        dropStoredItems();
+    }
+
     public void dropStoredItems() {
         if (level().isClientSide) {
             return;
@@ -171,7 +186,9 @@ public final class MinionEntity extends PathfinderMob {
             tickWork(serverLevel);
         } else {
             entityData.set(WORKING, false);
-            if (returnContainer != null && !inventory.isEmpty()) {
+            if (carryTargetUUID != null) {
+                tickCarryTarget(serverLevel);
+            } else if (returnContainer != null && !inventory.isEmpty()) {
                 tickReturnToContainer(serverLevel);
             } else if (followingMaster) {
                 tickFollow(serverLevel);
@@ -218,6 +235,22 @@ public final class MinionEntity extends PathfinderMob {
             }
         } else {
             stuckTicks = Math.max(0, stuckTicks - 1);
+        }
+    }
+
+    private void tickCarryTarget(ServerLevel level) {
+        Entity target = level.getEntity(carryTargetUUID);
+        if (!(target instanceof LivingEntity living) || !living.isAlive()) {
+            carryTargetUUID = null;
+            navigation.stop();
+            return;
+        }
+        if (distanceToSqr(living) <= 4.0D) {
+            navigation.stop();
+            living.startRiding(this, true);
+            carryTargetUUID = null;
+        } else {
+            navigation.moveTo(living, 1.2D);
         }
     }
 
@@ -351,6 +384,9 @@ public final class MinionEntity extends PathfinderMob {
         if (returnContainer != null) {
             tag.putLong("returnContainer", returnContainer.asLong());
         }
+        if (carryTargetUUID != null) {
+            tag.putUUID("carryTargetUUID", carryTargetUUID);
+        }
 
         NonNullList<ItemStack> savedItems = NonNullList.withSize(inventory.getContainerSize(), ItemStack.EMPTY);
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
@@ -374,6 +410,7 @@ public final class MinionEntity extends PathfinderMob {
         followingMaster = tag.getBoolean("followingMaster");
         moveTarget = tag.contains("moveTarget") ? BlockPos.of(tag.getLong("moveTarget")) : null;
         returnContainer = tag.contains("returnContainer") ? BlockPos.of(tag.getLong("returnContainer")) : null;
+        carryTargetUUID = tag.hasUUID("carryTargetUUID") ? tag.getUUID("carryTargetUUID") : null;
 
         if (tag.contains("MinionInventory")) {
             NonNullList<ItemStack> savedItems = NonNullList.withSize(inventory.getContainerSize(), ItemStack.EMPTY);

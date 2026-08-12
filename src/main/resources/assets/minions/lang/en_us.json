@@ -5,6 +5,7 @@
   "key.categories.minions": "Minions",
   "screen.minions.title": "The Darkness Listens...",
   "screen.minions.hint": "Mining orders use the block you were looking at.",
+  "screen.minions.evildeed": "Commit to Evil",
   "screen.minions.follow": "Follow",
   "screen.minions.unsummon": "Unsummon",
   "screen.minions.mineshaft": "Dig Mineshaft",
@@ -20,5 +21,9 @@
   "message.minions.chop": "Minions ordered to harvest the tree.",
   "message.minions.mine": "Minions ordered to mine the vein.",
   "message.minions.chest": "Minions will return carried items to this inventory.",
-  "message.minions.no_willpower": "You are too hungry to command the minions."
+  "message.minions.no_willpower": "You are too hungry to command the minions.",
+  "message.minions.deeds_disabled": "Evil deeds are disabled on this server.",
+  "message.minions.need_xp": "You need %s experience levels to commit an evil deed.",
+  "message.minions.deed_progress": "The darkness noticed. Deeds: %s/%s.",
+  "message.minions.staff_reward": "The darkness rewards you with the Master's Staff."
 }

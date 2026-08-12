@@ -35,7 +35,7 @@ The original work is **not relicensed by this repository**. Original code and as
 
 ## Current version
 
-**`2.0.3-1.21.1-beta.6`**
+**`2.0.3-1.21.1-beta.7`**
 
 Target:
 

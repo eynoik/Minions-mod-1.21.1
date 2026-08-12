@@ -73,9 +73,24 @@ public final class CustomDigScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(font, title, width / 2, 40, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.custom.width", xzSize), width / 2, height / 4 + 40, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.custom.height", ySize), width / 2, height / 4 + 80, 0xFFFFFF);
         super.render(graphics, mouseX, mouseY, partialTick);
+
+        int baseY = height / 4;
+        graphics.drawCenteredString(font, title, width / 2, 40, 0xFFFFFF);
+
+        graphics.fill(width / 2 - 90, baseY - 48, width / 2 + 90, baseY - 29, 0xC0000000);
+        graphics.drawCenteredString(
+                font,
+                Component.translatable("screen.minions.custom.size", xzSize, ySize, xzSize),
+                width / 2,
+                baseY - 42,
+                0xFFFFFF
+        );
+
+        graphics.fill(width / 2 - 70, baseY + 32, width / 2 + 70, baseY + 52, 0xC0000000);
+        graphics.drawCenteredString(font, Component.translatable("screen.minions.custom.width", xzSize), width / 2, baseY + 39, 0xFFFFFF);
+
+        graphics.fill(width / 2 - 70, baseY + 72, width / 2 + 70, baseY + 92, 0xC0000000);
+        graphics.drawCenteredString(font, Component.translatable("screen.minions.custom.height", ySize), width / 2, baseY + 79, 0xFFFFFF);
     }
 }

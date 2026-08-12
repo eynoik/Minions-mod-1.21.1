@@ -19,6 +19,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.Container;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Entity;
@@ -36,6 +37,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -428,10 +430,10 @@ public final class MinionEntity extends PathfinderMob {
 
             level.destroyBlockProgress(getId(), target, -1);
             if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
-                level.destroyBlock(target, true, this);
+                harvestBlockIntoInventory(level, target, state);
             } else {
                 if (!state.isAir()) {
-                    level.destroyBlock(target, true, this);
+                    harvestBlockIntoInventory(level, target, state);
                 }
                 BlockState desired = desiredState(order);
                 if (desired != null && desired.canSurvive(level, target)) {
@@ -477,6 +479,39 @@ public final class MinionEntity extends PathfinderMob {
         ItemStack held = getMainHandItem();
         if (!ItemStack.isSameItemSameComponents(held, wanted)) {
             setItemInHand(InteractionHand.MAIN_HAND, wanted);
+        }
+    }
+
+    /**
+     * Legacy Minions do not leave normal mining drops scattered on the floor.
+     * The harvested block is converted to drops using the Minion's visible tool
+     * and those drops are inserted directly into its 24-slot backpack. Overflow
+     * is left in-world and marks the backpack full so return/deposit logic runs.
+     * This is deliberately separate from dropStoredItemsToward(), so the manual
+     * "give me your items" command keeps its old throw-toward-owner behavior.
+     */
+    private void harvestBlockIntoInventory(ServerLevel level, BlockPos target, BlockState state) {
+        BlockEntity blockEntity = state.hasBlockEntity() ? level.getBlockEntity(target) : null;
+        List<ItemStack> drops = Block.getDrops(state, level, target, blockEntity, this, getMainHandItem());
+
+        level.destroyBlock(target, false, this);
+
+        for (ItemStack drop : drops) {
+            if (drop.isEmpty()) {
+                continue;
+            }
+            ItemStack remaining = inventory.addItem(drop.copy());
+            if (!remaining.isEmpty()) {
+                inventoryFull = true;
+                ItemEntity overflow = new ItemEntity(
+                        level,
+                        target.getX() + 0.5D,
+                        target.getY() + 0.5D,
+                        target.getZ() + 0.5D,
+                        remaining
+                );
+                level.addFreshEntity(overflow);
+            }
         }
     }
 
@@ -672,6 +707,19 @@ public final class MinionEntity extends PathfinderMob {
             }
         }
         return around.above();
+    }
+
+    @Override
+    public boolean isInvulnerableTo(DamageSource source) {
+        // The 1.12.2 Minion rejected ordinary damage entirely. For the modern
+        // port keep player/mob-caused damage semantics available, but make the
+        // worker immune to environmental hazards: lava/fire, drowning,
+        // suffocation, falling, cactus, stalactites and other source-less cave
+        // damage. Projectile/mob damage still has a source entity.
+        if (source.getEntity() == null && source.getDirectEntity() == null) {
+            return true;
+        }
+        return super.isInvulnerableTo(source);
     }
 
     @Override

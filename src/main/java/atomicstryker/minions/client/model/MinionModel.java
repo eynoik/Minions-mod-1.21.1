@@ -12,6 +12,7 @@ import net.minecraft.client.model.geom.builders.LayerDefinition;
 import net.minecraft.client.model.geom.builders.MeshDefinition;
 import net.minecraft.client.model.geom.builders.PartDefinition;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 
 public final class MinionModel extends HumanoidModel<MinionEntity> {
     public static final ModelLayerLocation LAYER = new ModelLayerLocation(
@@ -82,8 +83,13 @@ public final class MinionModel extends HumanoidModel<MinionEntity> {
             rightArm.xRot = (float) Math.PI;
             leftArm.xRot = (float) Math.PI;
         } else if (entity.isWorking()) {
-            rightArm.xRot -= 0.65F;
-            leftArm.xRot -= 0.35F;
+            // Do not merely hold the tool at a bent angle. Drive a continuous,
+            // obvious mining arc while WORKING is synced from the server.
+            float digSwing = Mth.sin(ageInTicks * 1.35F);
+            rightArm.xRot = -1.15F + digSwing * 0.90F;
+            rightArm.yRot = 0.0F;
+            rightArm.zRot = 0.0F;
+            leftArm.xRot = -0.35F - digSwing * 0.15F;
         }
     }
 }

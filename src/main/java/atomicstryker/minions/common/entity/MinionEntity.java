@@ -77,6 +77,8 @@ public final class MinionEntity extends PathfinderMob {
     private boolean forceReturnGoods;
     private boolean stripMining;
     private WorkOrder activeOrder;
+    private List<BlockPos> activeTreeLogs = List.of();
+    private List<BlockPos> activeTreeLeaves = List.of();
 
     public MinionEntity(EntityType<? extends MinionEntity> entityType, Level level) {
         super(entityType, level);
@@ -373,6 +375,11 @@ public final class MinionEntity extends PathfinderMob {
             resetActiveWork();
             activeOrder = order;
             workTicks = 0;
+            if (order.action() == WorkAction.TREE_BREAK) {
+                activeTreeLogs = MinionManager.collectTreeLogs(
+                        level, order.pos(), Math.max(64, MinionsConfig.MAX_TREE_BLOCKS.get()));
+                activeTreeLeaves = MinionManager.collectTreeLeaves(level, activeTreeLogs);
+            }
         }
 
         BlockPos target = order.pos();
@@ -399,16 +406,28 @@ public final class MinionEntity extends PathfinderMob {
         }
 
         double distance = distanceToSqr(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
-        double workReachSq = order.action() == WorkAction.TREE_BREAK ? 256.0D : 9.0D;
+        // Legacy BlockTask_TreeChop inherited the normal 3-block work reach.
+        // The Minion must actually walk up to the trunk instead of chopping from afar.
+        double workReachSq = 9.0D;
         if (distance <= workReachSq) {
             navigation.stop();
             entityData.set(WORKING, true);
             getLookControl().setLookAt(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
             adaptWorkingTool(state, order.action());
 
-            int requiredTicks = (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK)
-                    ? MinionsConfig.WORK_TICKS_PER_BLOCK.get()
-                    : Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
+            int requiredTicks;
+            if (order.action() == WorkAction.TREE_BREAK) {
+                // Original BlockTask_TreeChop used 1000 ms per wood block and
+                // then removed the complete tree in one finish step.
+                requiredTicks = Math.max(
+                        MinionsConfig.WORK_TICKS_PER_BLOCK.get(),
+                        MinionsConfig.WORK_TICKS_PER_BLOCK.get() * Math.max(1, activeTreeLogs.size())
+                );
+            } else if (order.action() == WorkAction.BREAK) {
+                requiredTicks = MinionsConfig.WORK_TICKS_PER_BLOCK.get();
+            } else {
+                requiredTicks = Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
+            }
             workTicks++;
 
             if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
@@ -429,7 +448,9 @@ public final class MinionEntity extends PathfinderMob {
             }
 
             level.destroyBlockProgress(getId(), target, -1);
-            if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
+            if (order.action() == WorkAction.TREE_BREAK) {
+                harvestWholeTreeIntoInventory(level);
+            } else if (order.action() == WorkAction.BREAK) {
                 harvestBlockIntoInventory(level, target, state);
             } else {
                 if (!state.isAir()) {
@@ -451,11 +472,17 @@ public final class MinionEntity extends PathfinderMob {
             workTicks = 0;
         }
         adaptWorkingTool(state, order.action());
-        boolean navigating = navigation.moveTo(target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D, 1.15D);
+        BlockPos navigationTarget = order.action() == WorkAction.TREE_BREAK
+                ? findTreeWorkPosition(level, target)
+                : target;
+        boolean navigating = navigation.moveTo(
+                navigationTarget.getX() + 0.5D, navigationTarget.getY(), navigationTarget.getZ() + 0.5D, 1.15D);
         if (!navigating) {
             stuckTicks++;
             if (stuckTicks > 80) {
-                BlockPos safe = findSafeTeleport(level, target);
+                BlockPos safe = order.action() == WorkAction.TREE_BREAK
+                        ? findTreeWorkPosition(level, target)
+                        : findSafeTeleport(level, target);
                 teleportTo(safe.getX() + 0.5D, safe.getY(), safe.getZ() + 0.5D);
                 stuckTicks = 0;
             }
@@ -479,6 +506,29 @@ public final class MinionEntity extends PathfinderMob {
         ItemStack held = getMainHandItem();
         if (!ItemStack.isSameItemSameComponents(held, wanted)) {
             setItemInHand(InteractionHand.MAIN_HAND, wanted);
+        }
+    }
+
+    /**
+     * Finishes a legacy-style tree job in one server tick: after the Minion has
+     * spent time chopping at the trunk, all scanned logs and their canopy are
+     * removed together. Log drops and normal leaf loot (saplings/apples/sticks
+     * according to the active vanilla/modded loot table) go into the backpack.
+     */
+    private void harvestWholeTreeIntoInventory(ServerLevel level) {
+        for (BlockPos log : activeTreeLogs) {
+            BlockState state = level.getBlockState(log);
+            if (state.is(BlockTags.LOGS)) {
+                harvestBlockIntoInventory(level, log, state);
+            }
+        }
+        for (BlockPos leaf : activeTreeLeaves) {
+            BlockState state = level.getBlockState(leaf);
+            if (state.is(BlockTags.LEAVES)) {
+                // The held iron axe is neither shears nor Silk Touch, therefore
+                // Block.getDrops follows the normal Minecraft leaf loot chances.
+                harvestBlockIntoInventory(level, leaf, state);
+            }
         }
     }
 
@@ -521,6 +571,8 @@ public final class MinionEntity extends PathfinderMob {
         }
         workQueue.poll();
         activeOrder = null;
+        activeTreeLogs = List.of();
+        activeTreeLeaves = List.of();
         workTicks = 0;
         stuckTicks = 0;
         entityData.set(WORKING, false);
@@ -537,6 +589,8 @@ public final class MinionEntity extends PathfinderMob {
             serverLevel.destroyBlockProgress(getId(), activeOrder.pos(), -1);
         }
         activeOrder = null;
+        activeTreeLogs = List.of();
+        activeTreeLeaves = List.of();
         workTicks = 0;
     }
 
@@ -697,6 +751,31 @@ public final class MinionEntity extends PathfinderMob {
             return null;
         }
         return level.getServer().getPlayerList().getPlayer(ownerUUID);
+    }
+
+    private BlockPos findTreeWorkPosition(ServerLevel level, BlockPos trunk) {
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                BlockPos candidate = trunk.offset(dx, 0, dz);
+                if (!level.getBlockState(candidate).isAir() || !level.getBlockState(candidate.above()).isAir()) {
+                    continue;
+                }
+                if (level.getBlockState(candidate.below()).isAir()) {
+                    continue;
+                }
+                double d = distanceToSqr(candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D);
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    best = candidate.immutable();
+                }
+            }
+        }
+        return best == null ? trunk : best;
     }
 
     private BlockPos findSafeTeleport(ServerLevel level, BlockPos around) {

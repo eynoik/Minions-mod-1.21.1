@@ -22,7 +22,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
@@ -261,7 +263,7 @@ public final class MinionManager {
         trees.add(tree);
     }
 
-    private static List<BlockPos> collectTreeLogs(ServerLevel level, BlockPos base, int limit) {
+    public static List<BlockPos> collectTreeLogs(ServerLevel level, BlockPos base, int limit) {
         Queue<BlockPos> open = new ArrayDeque<>();
         Set<BlockPos> seen = new HashSet<>();
         List<BlockPos> logs = new ArrayList<>();
@@ -293,6 +295,66 @@ public final class MinionManager {
         return logs;
     }
 
+    /**
+     * Finds the leaf canopy belonging to a scanned tree. Leaves are flood-filled
+     * from the target logs up to vanilla's normal six-block leaf-distance range.
+     * A leaf directly touching a foreign log is not claimed, which avoids eating
+     * an adjacent tree trunk/canopy in dense forests as much as practical.
+     */
+    public static List<BlockPos> collectTreeLeaves(ServerLevel level, List<BlockPos> treeLogs) {
+        if (treeLogs.isEmpty()) {
+            return List.of();
+        }
+
+        Set<BlockPos> targetLogs = new HashSet<>(treeLogs);
+        Queue<BlockPos> open = new ArrayDeque<>();
+        Map<BlockPos, Integer> distance = new HashMap<>();
+
+        for (BlockPos log : treeLogs) {
+            for (Direction direction : Direction.values()) {
+                BlockPos candidate = log.relative(direction).immutable();
+                if (level.getBlockState(candidate).is(BlockTags.LEAVES) && !distance.containsKey(candidate)) {
+                    distance.put(candidate, 1);
+                    open.add(candidate);
+                }
+            }
+        }
+
+        List<BlockPos> leaves = new ArrayList<>();
+        while (!open.isEmpty()) {
+            BlockPos leaf = open.remove();
+            int currentDistance = distance.getOrDefault(leaf, 7);
+            if (!level.getBlockState(leaf).is(BlockTags.LEAVES)) {
+                continue;
+            }
+
+            boolean touchesForeignLog = false;
+            for (Direction direction : Direction.values()) {
+                BlockPos neighbour = leaf.relative(direction);
+                if (level.getBlockState(neighbour).is(BlockTags.LOGS) && !targetLogs.contains(neighbour)) {
+                    touchesForeignLog = true;
+                    break;
+                }
+            }
+            if (touchesForeignLog) {
+                continue;
+            }
+
+            leaves.add(leaf);
+            if (currentDistance >= 6) {
+                continue;
+            }
+            for (Direction direction : Direction.values()) {
+                BlockPos next = leaf.relative(direction).immutable();
+                if (!distance.containsKey(next) && level.getBlockState(next).is(BlockTags.LEAVES)) {
+                    distance.put(next, currentDistance + 1);
+                    open.add(next);
+                }
+            }
+        }
+        return leaves;
+    }
+
     private static void assignTreeWork(ServerPlayer player, List<List<BlockPos>> trees) {
         List<MinionEntity> minions = getOwned(player);
         if (minions.isEmpty()) {
@@ -306,10 +368,14 @@ public final class MinionManager {
 
         int workerIndex = 0;
         for (List<BlockPos> tree : trees) {
-            MinionEntity worker = minions.get(workerIndex++ % minions.size());
-            for (BlockPos log : tree) {
-                worker.enqueueTreeWork(log);
+            if (tree.isEmpty()) {
+                continue;
             }
+            MinionEntity worker = minions.get(workerIndex++ % minions.size());
+            // Legacy BlockTask_TreeChop was one task for an entire scanned tree.
+            // Queue only the lowest trunk block; the Minion rescans the intact
+            // tree when it starts the job and removes the whole tree at finish.
+            worker.enqueueTreeWork(tree.get(0));
         }
     }
 

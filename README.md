@@ -35,7 +35,7 @@ The original work is **not relicensed by this repository**. Original code and as
 
 ## Current version
 
-**`2.0.3-1.21.1-beta.7`**
+**`2.0.3-1.21.1-beta.8`**
 
 Target:
 
@@ -54,7 +54,7 @@ Target:
 - corrected gnome-like Minion model
 - visible axe / pickaxe / shovel while working
 - timed block breaking with swing animation, block cracks and hit sounds
-- nearby forest harvesting: one order can find up to 16 trees in a scan extending to 64 blocks
+- nearby forest harvesting: one order can find up to 16 trees in a scan extending to 64 blocks; each Minion walks to a trunk, chops for the legacy duration, then removes the whole tree and canopy at once with normal leaf loot
 - connected vein mining
 - legacy-style 5x5 spiral-stair mineshaft
 - independent 1x2 strip mines, including assigning individual Minions

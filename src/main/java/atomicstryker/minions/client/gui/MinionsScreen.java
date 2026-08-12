@@ -1,5 +1,6 @@
 package atomicstryker.minions.client.gui;
 
+import atomicstryker.minions.common.EvilDeeds;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -20,10 +21,15 @@ public final class MinionsScreen extends Screen {
                         button -> minecraft.setScreen(new MinionOrdersScreen(this)))
                 .bounds(x, y, 200, 20).build());
 
-        addRenderableWidget(Button.builder(
-                        Component.translatable("screen.minions.evildeed"),
-                        button -> minecraft.setScreen(new EvilDeedScreen(this)))
-                .bounds(x, y + 40, 200, 20).build());
+        boolean hasMasterStaff = minecraft != null
+                && minecraft.player != null
+                && EvilDeeds.hasMasterStaff(minecraft.player);
+        if (!hasMasterStaff) {
+            addRenderableWidget(Button.builder(
+                            Component.translatable("screen.minions.evildeed"),
+                            button -> minecraft.setScreen(new EvilDeedScreen(this)))
+                    .bounds(x, y + 40, 200, 20).build());
+        }
 
         addRenderableWidget(Button.builder(
                         Component.translatable("screen.minions.nevermind"),

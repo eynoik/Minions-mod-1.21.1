@@ -279,7 +279,7 @@ public final class MinionManager {
 
     public static void stripMine(ServerPlayer player, BlockPos start) {
         List<MinionEntity> minions = getOwned(player);
-        MinionEntity worker = minions.stream().filter(minion -> !minion.isStripMining()).findFirst().orElse(null);
+        MinionEntity worker = minions.stream().filter(minion -> minion.queuedWork() == 0).findFirst().orElse(null);
         if (worker == null) {
             return;
         }
@@ -293,7 +293,6 @@ public final class MinionManager {
         worker.clearWork();
         worker.setFollowing(false);
         worker.clearMoveTarget();
-        worker.setStripMining(true);
 
         for (int step = 0; step < length; step++) {
             BlockPos base = start.relative(forward, step);
@@ -321,7 +320,7 @@ public final class MinionManager {
     }
 
     private static void scanValuableVein(ServerLevel level, MinionEntity worker, Set<BlockPos> queued, BlockPos start) {
-        if (!isValuable(level.getBlockState(start))) {
+        if (!isValuable(level, start)) {
             return;
         }
         for (BlockPos pos : floodMatching(level, start, Math.min(64, MinionsConfig.MAX_VEIN_BLOCKS.get()), false)) {
@@ -335,8 +334,9 @@ public final class MinionManager {
         }
     }
 
-    private static boolean isValuable(BlockState state) {
-        if (state.isAir() || state.getDestroySpeed(null, BlockPos.ZERO) < 0.0F) {
+    private static boolean isValuable(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir() || state.getDestroySpeed(level, pos) < 0.0F) {
             return false;
         }
         return !state.is(BlockTags.BASE_STONE_OVERWORLD)

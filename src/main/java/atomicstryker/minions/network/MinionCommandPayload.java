@@ -1,6 +1,7 @@
 package atomicstryker.minions.network;
 
 import atomicstryker.minions.MinionsMod;
+import atomicstryker.minions.common.EvilDeeds;
 import atomicstryker.minions.common.MinionManager;
 import atomicstryker.minions.common.entity.MinionEntity;
 import net.minecraft.core.BlockPos;
@@ -35,6 +36,7 @@ public record MinionCommandPayload(Command command, BlockPos target) implements 
         }
 
         switch (command) {
+            case COMMIT_EVIL -> EvilDeeds.commit(player);
             case FOLLOW -> MinionManager.follow(player);
             case UNSUMMON -> MinionManager.unsummon(player);
             case MOVE -> MinionManager.moveTo(player, target);
@@ -67,6 +69,7 @@ public record MinionCommandPayload(Command command, BlockPos target) implements 
     }
 
     public enum Command {
+        COMMIT_EVIL,
         FOLLOW,
         UNSUMMON,
         MOVE,

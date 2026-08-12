@@ -58,12 +58,14 @@ public final class MinionsClientEvents {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null) {
             MinionSelection.clear();
+            suppressOffhandUse = false;
             return;
         }
 
         if (MinionSelection.isActive()) {
             if (!minecraft.player.getMainHandItem().is(MinionsItems.MASTER_STAFF.get())) {
                 MinionSelection.clear();
+                suppressOffhandUse = false;
             } else if (minecraft.screen == null) {
                 MinionSelection.updateFromCrosshair();
             }
@@ -74,6 +76,7 @@ public final class MinionsClientEvents {
         }
         while (MENU_KEY.consumeClick()) {
             MinionSelection.clear();
+            suppressOffhandUse = false;
             minecraft.setScreen(new MinionsScreen());
         }
     }
@@ -82,13 +85,19 @@ public final class MinionsClientEvents {
     public static void interactionKey(InputEvent.InteractionKeyMappingTriggered event) {
         Minecraft minecraft = Minecraft.getInstance();
 
+        // A successful main-hand selection may be followed by a synthetic off-hand use event.
+        // Suppress only that off-hand event. If no off-hand event arrives, the next real
+        // main-hand click clears the stale guard and is allowed through normally.
         if (suppressOffhandUse && event.isUseItem()) {
-            event.setCanceled(true);
-            event.setSwingHand(false);
             if (event.getHand() == InteractionHand.OFF_HAND) {
+                event.setCanceled(true);
+                event.setSwingHand(false);
+                suppressOffhandUse = false;
+                return;
+            }
+            if (event.getHand() == InteractionHand.MAIN_HAND) {
                 suppressOffhandUse = false;
             }
-            return;
         }
 
         if (!event.isUseItem() || !MinionSelection.isActive() || minecraft.player == null) {
@@ -96,6 +105,7 @@ public final class MinionsClientEvents {
         }
         if (!minecraft.player.getMainHandItem().is(MinionsItems.MASTER_STAFF.get())) {
             MinionSelection.clear();
+            suppressOffhandUse = false;
             return;
         }
 

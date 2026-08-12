@@ -6,35 +6,44 @@ Playable NeoForge 1.21.1 port of AtomicStryker's Minions mod from Forge 1.12.2.
 
 - `src/main/` — active NeoForge 1.21.1 implementation
 - `legacy/1.12.2/` — extracted Forge 1.12.2 project used as the porting reference
-- `PORTING.md` — feature/parity tracker and deliberate modernization notes
+- `PORTING.md` — feature/parity tracker and modernization notes
 
 ## Current version
 
-`2.0.3-1.21.1-beta.1`
+`2.0.3-1.21.1-beta.2`
 
 ## Implemented
 
 - Master's Staff with original texture
-- evil-deed XP progression and staff reward
+- original evil-deed list, three-choice deed screen, original deed sounds and delayed gods response/reward sounds
 - configurable Minions-per-player and food costs
 - summon, move, follow and unsummon
+- original Minion-style sounds for spawning, orders, tree work, pickup, staff bolt and ambient squeaks
 - tree harvesting and vein mining
-- mineshaft, strip-mine and configurable area-dig jobs
+- legacy-style 5x5 spiral-stair mineshaft
+- independent 1x2 strip mines: each repeated order can assign another idle Minion its own strip
+- strip-mine floor repair, ore/valuable-wall scanning and periodic torches
+- configurable custom area dig with the original 3..71 width / 3..25 height menu
+- restored world-space selection outline + block grid before mineshaft, strip-mine and custom-dig confirmation
 - 24-slot Minion inventory
 - automatic pickup of dropped items
 - return/deposit into container inventories
 - carrying mobs/players and dropping passengers/items
-- persistent ownership, inventory and unfinished work queues
+- persistent ownership, inventory and unfinished typed work queues
 - NeoForge custom-payload networking
-- `M` command menu
-- modern Minion model based on the original geometry/texture
+- separate `Minion Orders` and `Commit to Evil` menu paths under `M`
+- corrected original gnome-like Minion model pivots and carrying animation
 - staff lightning attack
 - English and Polish translations
 - GitHub Actions build validation and JAR artifact
 
 ## Controls
 
-- `M` — open Minions command menu
+- `M` — open the Minions root menu
+- `M` -> `Minion Orders` — old-style order menu
+- `M` -> `Commit to Evil` — separate evil-deed flow with three random original deeds
+- `Dig Mineshaft`, `Strip Mine` or `Dig...` — enter selection mode; move the crosshair to preview the old-style grid and right-click with the Master's Staff to confirm
+- `Dig...` — opens the restored size screen before selection
 - quick right-click with Master's Staff on a block — summon a missing Minion or move the group
 - right-click a log — harvest the tree
 - Shift + quick right-click a block — mine the matching vein/block cluster
@@ -45,11 +54,9 @@ Playable NeoForge 1.21.1 port of AtomicStryker's Minions mod from Forge 1.12.2.
 - quick right-click an inventory block — assign it as the return/deposit inventory
 - left-click a block with the Staff — magic lightning attack
 
-The `M` menu also exposes mineshaft, strip-mine, area-dig, vein, tree, drop, follow and unsummon orders.
-
 ## 1.21.1 modernization
 
-The gameplay systems are ported, but obsolete implementation details are not copied blindly. The 1.12.2 custom A* worker is replaced by vanilla 1.21.1 navigation with stuck recovery, the old packet helper is replaced by NeoForge payloads, and the legacy OpenGL/fractal-lightning code is replaced with modern equivalents. See `PORTING.md` for details.
+The gameplay and interaction flow are ported closely, while implementation details that cannot sensibly survive the 1.12.2 -> 1.21.1 API jump use modern equivalents. The old custom A* worker is replaced by vanilla navigation with stuck recovery, legacy networking is replaced by NeoForge payloads, and old immediate-mode OpenGL selection rendering is recreated with the modern level-render event and line buffers. See `PORTING.md` for details.
 
 ## Build
 

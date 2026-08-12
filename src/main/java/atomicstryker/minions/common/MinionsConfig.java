@@ -35,9 +35,12 @@ public final class MinionsConfig {
         builder.push("jobs");
         MAX_TREE_BLOCKS = builder.defineInRange("maxTreeBlocks", 192, 16, 2048);
         MAX_VEIN_BLOCKS = builder.defineInRange("maxVeinBlocks", 128, 8, 1024);
-        STRIP_MINE_LENGTH = builder.defineInRange("stripMineLength", 48, 8, 256);
-        CUSTOM_DIG_SIZE = builder.defineInRange("customDigSize", 5, 1, 15);
-        CUSTOM_DIG_HEIGHT = builder.defineInRange("customDigHeight", 4, 1, 16);
+        STRIP_MINE_LENGTH = builder.comment("Legacy strip mines were 80 blocks long.")
+                .defineInRange("stripMineLength", 80, 8, 256);
+        CUSTOM_DIG_SIZE = builder.comment("Default custom dig width. The in-game legacy menu can select 3..71.")
+                .defineInRange("customDigSize", 3, 3, 71);
+        CUSTOM_DIG_HEIGHT = builder.comment("Default custom dig height. The in-game legacy menu can select 3..25.")
+                .defineInRange("customDigHeight", 3, 3, 25);
         builder.pop();
 
         SPEC = builder.build();

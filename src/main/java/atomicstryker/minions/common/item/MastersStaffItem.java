@@ -2,9 +2,11 @@ package atomicstryker.minions.common.item;
 
 import atomicstryker.minions.common.MinionManager;
 import atomicstryker.minions.common.entity.MinionEntity;
+import atomicstryker.minions.registry.MinionsSounds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
@@ -54,6 +56,7 @@ public final class MastersStaffItem extends Item {
 
         if (target instanceof MinionEntity minion && serverPlayer.getUUID().equals(minion.getOwnerUUID())) {
             minion.dropPassengerAndItems();
+            serverPlayer.level().playSound(null, minion.blockPosition(), MinionsSounds.FOR_YOU.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
             serverPlayer.displayClientMessage(Component.translatable("message.minions.drop"), true);
             return InteractionResult.SUCCESS;
         }
@@ -94,11 +97,13 @@ public final class MastersStaffItem extends Item {
             for (MinionEntity minion : MinionManager.getOwned(player)) {
                 minion.setReturnContainer(clicked);
             }
+            level.playSound(null, clicked, MinionsSounds.RANDOM_ORDER.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
             player.displayClientMessage(Component.translatable("message.minions.chest"), true);
             return;
         }
 
         if (!MinionManager.canUsePower(player)) {
+            level.playSound(null, player.blockPosition(), MinionsSounds.FART.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
             player.displayClientMessage(Component.translatable("message.minions.no_willpower"), true);
             return;
         }

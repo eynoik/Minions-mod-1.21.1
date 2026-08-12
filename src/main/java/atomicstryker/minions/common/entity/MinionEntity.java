@@ -1,14 +1,19 @@
 package atomicstryker.minions.common.entity;
 
+import atomicstryker.minions.registry.MinionsSounds;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
@@ -23,8 +28,10 @@ import net.minecraft.world.entity.ai.goal.RandomStrollGoal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayDeque;
@@ -43,7 +50,7 @@ public final class MinionEntity extends PathfinderMob {
     );
 
     private final SimpleContainer inventory = new SimpleContainer(24);
-    private final Queue<BlockPos> workQueue = new ArrayDeque<>();
+    private final Queue<WorkOrder> workQueue = new ArrayDeque<>();
 
     private UUID ownerUUID;
     private boolean followingMaster;
@@ -123,7 +130,27 @@ public final class MinionEntity extends PathfinderMob {
     }
 
     public void enqueueWork(BlockPos pos) {
-        workQueue.add(pos.immutable());
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.BREAK, null));
+    }
+
+    public void enqueuePlaceCobble(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_COBBLE, null));
+    }
+
+    public void enqueuePlaceDirt(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_DIRT, null));
+    }
+
+    public void enqueuePlaceStair(BlockPos pos, Direction facing) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_STAIR, facing));
+    }
+
+    public void enqueuePlaceTorch(BlockPos pos) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.PLACE_TORCH, null));
+    }
+
+    private void enqueue(WorkOrder order) {
+        workQueue.add(order);
         entityData.set(WORKING, true);
     }
 
@@ -199,27 +226,52 @@ public final class MinionEntity extends PathfinderMob {
     }
 
     private void tickWork(ServerLevel level) {
-        BlockPos target = workQueue.peek();
-        if (target == null) {
+        WorkOrder order = workQueue.peek();
+        if (order == null) {
             entityData.set(WORKING, false);
             return;
         }
 
+        BlockPos target = order.pos();
         BlockState state = level.getBlockState(target);
-        if (state.isAir()) {
-            workQueue.poll();
-            return;
-        }
-        if (state.getDestroySpeed(level, target) < 0.0F) {
-            workQueue.poll();
-            return;
+        if (order.action() == WorkAction.BREAK) {
+            if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
+                workQueue.poll();
+                return;
+            }
+        } else {
+            BlockState desired = desiredState(order);
+            if (desired == null) {
+                workQueue.poll();
+                return;
+            }
+            if (state.equals(desired)) {
+                workQueue.poll();
+                return;
+            }
+            if (!state.isAir() && state.getDestroySpeed(level, target) < 0.0F) {
+                workQueue.poll();
+                return;
+            }
         }
 
         double distance = distanceToSqr(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
         if (distance <= 9.0D) {
             navigation.stop();
             swing(net.minecraft.world.InteractionHand.MAIN_HAND);
-            level.destroyBlock(target, true, this);
+
+            if (order.action() == WorkAction.BREAK) {
+                level.destroyBlock(target, true, this);
+            } else {
+                if (!state.isAir()) {
+                    level.destroyBlock(target, true, this);
+                }
+                BlockState desired = desiredState(order);
+                if (desired != null && desired.canSurvive(level, target)) {
+                    level.setBlock(target, desired, 3);
+                }
+            }
+
             workQueue.poll();
             stuckTicks = 0;
             return;
@@ -236,6 +288,19 @@ public final class MinionEntity extends PathfinderMob {
         } else {
             stuckTicks = Math.max(0, stuckTicks - 1);
         }
+    }
+
+    private BlockState desiredState(WorkOrder order) {
+        return switch (order.action()) {
+            case BREAK -> null;
+            case PLACE_COBBLE -> Blocks.COBBLESTONE.defaultBlockState();
+            case PLACE_DIRT -> Blocks.DIRT.defaultBlockState();
+            case PLACE_TORCH -> Blocks.TORCH.defaultBlockState();
+            case PLACE_STAIR -> Blocks.STONE_STAIRS.defaultBlockState().setValue(
+                    BlockStateProperties.HORIZONTAL_FACING,
+                    order.facing() == null || order.facing().getAxis() == Direction.Axis.Y ? Direction.NORTH : order.facing()
+            );
+        };
     }
 
     private void tickCarryTarget(ServerLevel level) {
@@ -366,6 +431,11 @@ public final class MinionEntity extends PathfinderMob {
     }
 
     @Override
+    protected SoundEvent getAmbientSound() {
+        return MinionsSounds.MINION_SQUEAK.get();
+    }
+
+    @Override
     public Component getName() {
         return hasCustomName() ? getCustomName() : Component.translatable("entity.minions.minion");
     }
@@ -395,7 +465,16 @@ public final class MinionEntity extends PathfinderMob {
         CompoundTag inventoryTag = new CompoundTag();
         ContainerHelper.saveAllItems(inventoryTag, savedItems, level().registryAccess());
         tag.put("MinionInventory", inventoryTag);
-        tag.putLongArray("workQueue", workQueue.stream().mapToLong(BlockPos::asLong).toArray());
+
+        ListTag workList = new ListTag();
+        for (WorkOrder order : workQueue) {
+            CompoundTag workTag = new CompoundTag();
+            workTag.putLong("Pos", order.pos().asLong());
+            workTag.putInt("Action", order.action().ordinal());
+            workTag.putInt("Facing", order.facing() == null ? -1 : order.facing().get3DDataValue());
+            workList.add(workTag);
+        }
+        tag.put("workQueueV2", workList);
     }
 
     @Override
@@ -419,9 +498,24 @@ public final class MinionEntity extends PathfinderMob {
                 inventory.setItem(slot, savedItems.get(slot));
             }
         }
+
         workQueue.clear();
-        for (long packed : tag.getLongArray("workQueue")) {
-            workQueue.add(BlockPos.of(packed));
+        if (tag.contains("workQueueV2", Tag.TAG_LIST)) {
+            ListTag workList = tag.getList("workQueueV2", Tag.TAG_COMPOUND);
+            for (int i = 0; i < workList.size(); i++) {
+                CompoundTag workTag = workList.getCompound(i);
+                int actionId = workTag.getInt("Action");
+                WorkAction[] actions = WorkAction.values();
+                WorkAction action = actionId >= 0 && actionId < actions.length ? actions[actionId] : WorkAction.BREAK;
+                int facingId = workTag.getInt("Facing");
+                Direction facing = facingId < 0 ? null : Direction.from3DDataValue(facingId);
+                workQueue.add(new WorkOrder(BlockPos.of(workTag.getLong("Pos")), action, facing));
+            }
+        } else {
+            // beta.1 compatibility
+            for (long packed : tag.getLongArray("workQueue")) {
+                workQueue.add(new WorkOrder(BlockPos.of(packed), WorkAction.BREAK, null));
+            }
         }
         entityData.set(WORKING, !workQueue.isEmpty());
     }
@@ -429,5 +523,16 @@ public final class MinionEntity extends PathfinderMob {
     @Override
     public boolean removeWhenFarAway(double distanceToClosestPlayer) {
         return false;
+    }
+
+    public enum WorkAction {
+        BREAK,
+        PLACE_COBBLE,
+        PLACE_DIRT,
+        PLACE_STAIR,
+        PLACE_TORCH
+    }
+
+    public record WorkOrder(BlockPos pos, WorkAction action, Direction facing) {
     }
 }

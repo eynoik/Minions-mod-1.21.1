@@ -9,6 +9,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -59,7 +60,17 @@ public final class EvilDeeds {
     private EvilDeeds() {
     }
 
+    public static boolean hasMasterStaff(Player player) {
+        return player != null && player.getInventory().contains(new ItemStack(MinionsItems.MASTER_STAFF.get()));
+    }
+
     public static void commit(ServerPlayer player, int deedIndex) {
+        // Once the player owns a Master's Staff there is no reason to keep farming
+        // evil-deed progress. Keep this enforced server-side as well as hidden in the UI.
+        if (hasMasterStaff(player)) {
+            return;
+        }
+
         int cost = MinionsConfig.EVIL_DEED_XP_COST.get();
         if (cost < 0) {
             player.displayClientMessage(Component.translatable("message.minions.deeds_disabled"), false);

@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -40,6 +41,28 @@ public final class MastersStaffItem extends Item {
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         player.startUsingItem(hand);
         return InteractionResultHolder.consume(player.getItemInHand(hand));
+    }
+
+    @Override
+    public InteractionResult interactLivingEntity(ItemStack stack, Player player, LivingEntity target, InteractionHand hand) {
+        if (player.level().isClientSide) {
+            return InteractionResult.SUCCESS;
+        }
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return InteractionResult.PASS;
+        }
+
+        if (target instanceof MinionEntity minion && serverPlayer.getUUID().equals(minion.getOwnerUUID())) {
+            minion.dropPassengerAndItems();
+            serverPlayer.displayClientMessage(Component.translatable("message.minions.drop"), true);
+            return InteractionResult.SUCCESS;
+        }
+
+        if (MinionManager.pickup(serverPlayer, target)) {
+            serverPlayer.displayClientMessage(Component.translatable("message.minions.pickup"), true);
+            return InteractionResult.SUCCESS;
+        }
+        return InteractionResult.PASS;
     }
 
     @Override

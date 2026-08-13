@@ -1,0 +1,46 @@
+name: Publish beta.12 prerelease
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-beta12.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout beta.12 source
+        uses: actions/checkout@v4
+        with:
+          ref: b209b85763acfe747c1e8c4b53c2fbfc1bff5bcb
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build
+        run: ./gradlew build --stacktrace
+
+      - name: Create beta.12 prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: 2.0.3-1.21.1-beta.12
+          RELEASE_TARGET: b209b85763acfe747c1e8c4b53c2fbfc1bff5bcb
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="build/libs/minions-2.0.3-1.21.1-beta.12.jar"
+          test -f "$JAR"
+          gh release create "$TAG" "$JAR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_TARGET" \
+            --title "Minions 1.21.1 — beta.12" \
+            --notes "Strip mine pathing fix: Minions stay in the opened tunnel and use tunnel-safe recovery instead of wandering back toward the surface. Includes all beta.11 changes and the shortened README." \
+            --prerelease

@@ -1,0 +1,74 @@
+name: Apply beta.11 Minion speed tuning
+
+on:
+  push:
+    branches:
+      - agent/beta11-faster-minions
+    paths:
+      - '.github/workflows/apply-beta11-speed.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/beta11-faster-minions
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Apply speed tuning
+        shell: python
+        run: |
+          from pathlib import Path
+
+          entity = Path('src/main/java/atomicstryker/minions/common/entity/MinionEntity.java')
+          text = entity.read_text()
+          old = '.add(Attributes.MOVEMENT_SPEED, 0.225D)'
+          new = '.add(Attributes.MOVEMENT_SPEED, 0.30D)'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one movement-speed declaration, found {text.count(old)}')
+          entity.write_text(text.replace(old, new))
+
+          props = Path('gradle.properties')
+          ptext = props.read_text()
+          old_ver = 'mod_version=2.0.3-1.21.1-beta.10'
+          new_ver = 'mod_version=2.0.3-1.21.1-beta.11'
+          if ptext.count(old_ver) != 1:
+              raise SystemExit('beta.10 mod_version not found exactly once')
+          props.write_text(ptext.replace(old_ver, new_ver))
+
+          readme = Path('README.md')
+          rtext = readme.read_text()
+          if '**`2.0.3-1.21.1-beta.10`**' not in rtext:
+              raise SystemExit('README current beta.10 version marker not found')
+          rtext = rtext.replace('**`2.0.3-1.21.1-beta.10`**', '**`2.0.3-1.21.1-beta.11`**', 1)
+          feature = '- summon, move, follow, unsummon and explicit stop-work orders\n'
+          replacement = feature + '- faster modern movement tuning (0.30 base speed) so Minions keep up with the snappier feel of the legacy mod\n'
+          if feature not in rtext:
+              raise SystemExit('README feature insertion point not found')
+          readme.write_text(rtext.replace(feature, replacement, 1))
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/apply-beta11-speed.yml
+
+      - name: Build
+        run: ./gradlew build --stacktrace
+
+      - name: Commit beta.11 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "meynoik"
+          git config user.email "neynoi.k@gmail.com"
+          git add -A
+          git commit -m "Speed up Minion movement"
+          git push origin HEAD:agent/beta11-faster-minions

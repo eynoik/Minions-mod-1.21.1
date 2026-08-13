@@ -35,7 +35,7 @@ The original work is **not relicensed by this repository**. Original code and as
 
 ## Current version
 
-**`2.0.3-1.21.1-beta.11`**
+**`2.0.3-1.21.1-beta.12`**
 
 Target:
 
@@ -58,7 +58,7 @@ Target:
 - nearby forest harvesting: one order can find up to 16 trees in a scan extending to 64 blocks; each Minion walks to a trunk, chops for the legacy duration, then removes the whole tree and canopy at once with normal leaf loot
 - connected vein mining
 - legacy-style 5x5 spiral-stair mineshaft
-- independent 1x2 strip mines, including assigning individual Minions
+- independent 1x2 strip mines with tunnel-safe access pathing/recovery, including assigning individual Minions
 - strip-mine floor repair, valuable-block scanning and periodic torches
 - custom area digging with the old-style size selector
 - world-space selection grid before dig commands are confirmed

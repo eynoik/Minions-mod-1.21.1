@@ -35,7 +35,7 @@ The original work is **not relicensed by this repository**. Original code and as
 
 ## Current version
 
-**`2.0.3-1.21.1-beta.10`**
+**`2.0.3-1.21.1-beta.11`**
 
 Target:
 
@@ -50,6 +50,7 @@ Target:
 - `Commit to Evil` progression; hidden once the player already owns a Master's Staff
 - configurable Minions-per-player and food costs
 - summon, move, follow, unsummon and explicit stop-work orders
+- faster modern movement tuning (0.30 base speed) so Minions keep up with the snappier feel of the legacy mod
 - original-style Minion sounds without random ambient squeak spam
 - corrected gnome-like Minion model
 - visible axe / pickaxe / shovel while working

@@ -90,7 +90,7 @@ public final class MinionEntity extends PathfinderMob {
     public static AttributeSupplier.Builder createDefaultAttributes() {
         return LivingEntity.createLivingAttributes()
                 .add(Attributes.MAX_HEALTH, 24.0D)
-                .add(Attributes.MOVEMENT_SPEED, 0.225D)
+                .add(Attributes.MOVEMENT_SPEED, 0.30D)
                 .add(Attributes.FOLLOW_RANGE, 30.0D);
     }
 

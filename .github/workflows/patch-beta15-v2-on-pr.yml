@@ -1,0 +1,98 @@
+name: Patch beta.15 recall and hunger v2
+
+on:
+  pull_request:
+    types: [reopened]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    if: github.head_ref == 'agent/beta15-recall-hunger'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout beta.15 branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/beta15-recall-hunger
+          fetch-depth: 0
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Apply beta.15 patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'{label}: marker not found')
+              return text.replace(old, new, 1)
+
+          staff_path = Path('src/main/java/atomicstryker/minions/common/item/MastersStaffItem.java')
+          s = staff_path.read_text()
+          s = replace_once(s, 'import net.minecraft.world.phys.HitResult;\n', 'import net.minecraft.world.phys.HitResult;\n\nimport java.util.Set;\n', 'staff Set import')
+          s = replace_once(s, '    private static final int HOLD_TICKS = 20;\n', '    private static final int HOLD_TICKS = 20;\n    private static final double RECALL_DISTANCE_SQ = 48.0D * 48.0D;\n', 'recall constant')
+          s = replace_once(s,
+              '        BlockPos target = clicked.relative(blockHit.getDirection());\n        boolean spawned = MinionManager.spawnOrMove(player, target);',
+              '        recallDistantMinions(player);\n        BlockPos target = clicked.relative(blockHit.getDirection());\n        boolean spawned = MinionManager.spawnOrMove(player, target);',
+              'recall call')
+          ending = '''        player.displayClientMessage(Component.translatable(spawned ? "message.minions.summon" : "message.minions.move"), true);\n    }\n}\n'''
+          replacement = '''        player.displayClientMessage(Component.translatable(spawned ? "message.minions.summon" : "message.minions.move"), true);\n    }\n\n    private static void recallDistantMinions(ServerPlayer player) {\n        int recalled = 0;\n        for (MinionEntity minion : MinionManager.getOwned(player)) {\n            boolean differentDimension = minion.level() != player.level();\n            if (!differentDimension && minion.distanceToSqr(player) <= RECALL_DISTANCE_SQ) {\n                continue;\n            }\n            minion.clearWork();\n            minion.clearMoveTarget();\n            minion.setFollowing(false);\n            minion.releaseChunkLoading();\n            double angle = recalled * (Math.PI / 2.0D);\n            double x = player.getX() + Math.cos(angle) * 1.25D;\n            double z = player.getZ() + Math.sin(angle) * 1.25D;\n            minion.teleportTo(\n                    player.serverLevel(),\n                    x, player.getY(), z,\n                    Set.of(),\n                    player.getYRot(),\n                    player.getXRot()\n            );\n            recalled++;\n        }\n    }\n}\n'''
+          s = replace_once(s, ending, replacement, 'recall helper')
+          staff_path.write_text(s)
+
+          cfg_path = Path('src/main/java/atomicstryker/minions/common/MinionsConfig.java')
+          s = cfg_path.read_text()
+          s = replace_once(s, '.defineInRange("foodCostBig", 20.0D, 0.0D, 100.0D);', '.defineInRange("foodCostBig", 15.0D, 0.0D, 100.0D);', 'big hunger default')
+          s = replace_once(s, '.defineInRange("foodCostSmall", 1.5D, 0.0D, 20.0D);', '.defineInRange("foodCostSmall", 1.0D, 0.0D, 20.0D);', 'small hunger default')
+          cfg_path.write_text(s)
+
+          mgr_path = Path('src/main/java/atomicstryker/minions/common/MinionManager.java')
+          s = mgr_path.read_text()
+          s = replace_once(s,
+              '''    public static void exhaustBig(ServerPlayer player) {\n        if (!player.isCreative()) {\n            player.causeFoodExhaustion(MinionsConfig.BIG_EXHAUSTION.get().floatValue());\n        }\n    }''',
+              '''    public static void exhaustBig(ServerPlayer player) {\n        if (!player.isCreative()) {\n            double configured = MinionsConfig.BIG_EXHAUSTION.get();\n            player.causeFoodExhaustion((float) (configured == 20.0D ? 15.0D : configured));\n        }\n    }''',
+              'big hunger migration')
+          s = replace_once(s,
+              '''    public static void exhaustSmall(ServerPlayer player) {\n        if (!player.isCreative()) {\n            player.causeFoodExhaustion(MinionsConfig.SMALL_EXHAUSTION.get().floatValue());\n        }\n    }''',
+              '''    public static void exhaustSmall(ServerPlayer player) {\n        if (!player.isCreative()) {\n            double configured = MinionsConfig.SMALL_EXHAUSTION.get();\n            player.causeFoodExhaustion((float) (configured == 1.5D ? 1.0D : configured));\n        }\n    }''',
+              'small hunger migration')
+          mgr_path.write_text(s)
+
+          gradle = Path('gradle.properties')
+          s = gradle.read_text().replace('mod_version=2.0.3-1.21.1-beta.14', 'mod_version=2.0.3-1.21.1-beta.15', 1)
+          gradle.write_text(s)
+
+          readme = Path('README.md')
+          s = readme.read_text()
+          s = replace_once(s, '**Current version: `2.0.3-1.21.1-beta.14`**', '**Current version: `2.0.3-1.21.1-beta.15`**', 'readme version')
+          s = replace_once(s, '- move, follow, stop work and unsummon orders', '- move, follow, stop work and unsummon orders\n- distant Minions are recalled to their owner when summoned again (48+ blocks or another dimension)', 'readme recall')
+          readme.write_text(s)
+          PY
+
+      - name: Build beta.15
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew build --stacktrace
+
+      - name: Commit beta.15 source
+        shell: bash
+        run: |
+          rm -f .github/beta15-trigger
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- src/main/java/atomicstryker/minions/common/item/MastersStaffItem.java src/main/java/atomicstryker/minions/common/MinionsConfig.java src/main/java/atomicstryker/minions/common/MinionManager.java gradle.properties README.md
+          git add -u -- .github/beta15-trigger
+          git commit -m "Recall distant Minions and reduce hunger costs"
+          git push origin HEAD:agent/beta15-recall-hunger

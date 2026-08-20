@@ -64,7 +64,7 @@ public final class MinionEntity extends PathfinderMob {
     );
 
     private final SimpleContainer inventory = new SimpleContainer(24);
-    private final Queue<WorkOrder> workQueue = new ArrayDeque<>();
+    private final ArrayDeque<WorkOrder> workQueue = new ArrayDeque<>();
 
     private UUID ownerUUID;
     private boolean followingMaster;
@@ -168,6 +168,9 @@ public final class MinionEntity extends PathfinderMob {
 
     public void enqueueWork(BlockPos pos, int phase) {
         enqueue(new WorkOrder(pos.immutable(), WorkAction.BREAK, null, phase));
+    }
+    public void enqueueOreWork(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.ORE_BREAK, null, phase));
     }
 
     public void enqueueTreeWork(BlockPos pos) {
@@ -451,7 +454,7 @@ public final class MinionEntity extends PathfinderMob {
 
         BlockPos target = order.pos();
         BlockState state = level.getBlockState(target);
-        if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
+        if (isBreakAction(order.action())) {
             if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
                 completeCurrentOrder(level);
                 return;
@@ -473,9 +476,9 @@ public final class MinionEntity extends PathfinderMob {
         }
 
         double distance = distanceToSqr(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
-        // Legacy BlockTask_TreeChop inherited the normal 3-block work reach.
-        // The Minion must actually walk up to the trunk instead of chopping from afar.
-        double workReachSq = 9.0D;
+        // Normal jobs keep the legacy 3-block reach. Ore branches use player-like
+        // reach so a vein three or four blocks above the 1x2 tunnel does not deadlock.
+        double workReachSq = order.action() == WorkAction.ORE_BREAK ? 20.25D : 9.0D;
         if (distance <= workReachSq) {
             navigation.stop();
             entityData.set(WORKING, true);
@@ -490,14 +493,14 @@ public final class MinionEntity extends PathfinderMob {
                         MinionsConfig.WORK_TICKS_PER_BLOCK.get(),
                         MinionsConfig.WORK_TICKS_PER_BLOCK.get() * Math.max(1, activeTreeLogs.size())
                 );
-            } else if (order.action() == WorkAction.BREAK) {
+            } else if (isBreakAction(order.action())) {
                 requiredTicks = MinionsConfig.WORK_TICKS_PER_BLOCK.get();
             } else {
                 requiredTicks = Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
             }
             workTicks += workBoostTicks > 0 ? 2 : 1;
 
-            if (order.action() == WorkAction.BREAK || order.action() == WorkAction.TREE_BREAK) {
+            if (isBreakAction(order.action())) {
                 int crack = Math.min(9, (workTicks * 10) / Math.max(1, requiredTicks));
                 level.destroyBlockProgress(getId(), target, crack);
                 if (workTicks == 1 || workTicks % 6 == 0) {
@@ -517,7 +520,7 @@ public final class MinionEntity extends PathfinderMob {
             level.destroyBlockProgress(getId(), target, -1);
             if (order.action() == WorkAction.TREE_BREAK) {
                 harvestWholeTreeIntoInventory(level);
-            } else if (order.action() == WorkAction.BREAK) {
+            } else if (isBreakAction(order.action())) {
                 harvestBlockIntoInventory(level, target, state);
             } else {
                 if (!state.isAir()) {
@@ -542,15 +545,24 @@ public final class MinionEntity extends PathfinderMob {
         BlockPos navigationTarget;
         if (order.action() == WorkAction.TREE_BREAK) {
             navigationTarget = findTreeWorkPosition(level, target);
+        } else if (stripMining && order.action() == WorkAction.ORE_BREAK) {
+            navigationTarget = findStripMineOreWorkPosition(level, target);
+            if (navigationTarget == null) {
+                OreAccessPlan accessPlan = findOreAccessPlan(level, target, order.phase());
+                if (accessPlan != null) {
+                    prependOreAccess(order, accessPlan);
+                    return;
+                }
+                navigation.stop();
+                stuckTicks++;
+                if (stuckTicks > 40) {
+                    completeCurrentOrder(level);
+                }
+                return;
+            }
         } else if (stripMining) {
-            // Never ask vanilla navigation to path into the still-solid block.
-            // Pick a two-block-tall air position in the already opened tunnel
-            // that remains inside the normal three-block work reach instead.
             navigationTarget = findStripMineWorkPosition(level, target);
             if (navigationTarget == null) {
-                // beta.12 fell back to the Minion's own position here. Vanilla
-                // navigation could report that as success forever, so the stall
-                // counter never reached recovery and the queue froze on one block.
                 navigation.stop();
                 stuckTicks++;
                 if (stuckTicks > 40) {
@@ -561,7 +573,6 @@ public final class MinionEntity extends PathfinderMob {
         } else {
             navigationTarget = target;
         }
-
         if (stripMining && Math.abs(getY() - navigationTarget.getY()) > 3.0D) {
             // Strip miners must not escape vertically to the surface while the
             // navigator searches for a route. Snap them back to the tunnel-side
@@ -581,8 +592,17 @@ public final class MinionEntity extends PathfinderMob {
                 if (order.action() == WorkAction.TREE_BREAK) {
                     safe = findTreeWorkPosition(level, target);
                 } else if (stripMining) {
-                    safe = findStripMineWorkPosition(level, target);
+                    safe = order.action() == WorkAction.ORE_BREAK
+                            ? findStripMineOreWorkPosition(level, target)
+                            : findStripMineWorkPosition(level, target);
                     if (safe == null) {
+                        if (order.action() == WorkAction.ORE_BREAK) {
+                            OreAccessPlan accessPlan = findOreAccessPlan(level, target, order.phase());
+                            if (accessPlan != null) {
+                                prependOreAccess(order, accessPlan);
+                                return;
+                            }
+                        }
                         completeCurrentOrder(level);
                         return;
                     }
@@ -597,8 +617,14 @@ public final class MinionEntity extends PathfinderMob {
         }
     }
 
+    private static boolean isBreakAction(WorkAction action) {
+        return action == WorkAction.BREAK
+                || action == WorkAction.TREE_BREAK
+                || action == WorkAction.ORE_BREAK
+                || action == WorkAction.ACCESS_BREAK;
+    }
     private void adaptWorkingTool(BlockState state, WorkAction action) {
-        if (action != WorkAction.BREAK && action != WorkAction.TREE_BREAK) {
+        if (!isBreakAction(action)) {
             return;
         }
         ItemStack wanted;
@@ -702,7 +728,7 @@ public final class MinionEntity extends PathfinderMob {
 
     private BlockState desiredState(WorkOrder order) {
         return switch (order.action()) {
-            case BREAK, TREE_BREAK -> null;
+            case BREAK, TREE_BREAK, ORE_BREAK, ACCESS_BREAK -> null;
             case PLACE_COBBLE -> Blocks.COBBLESTONE.defaultBlockState();
             case PLACE_DIRT -> Blocks.DIRT.defaultBlockState();
             case PLACE_TORCH -> Blocks.TORCH.defaultBlockState();
@@ -884,6 +910,146 @@ public final class MinionEntity extends PathfinderMob {
         return best == null ? trunk : best;
     }
 
+    private BlockPos findStripMineOreWorkPosition(ServerLevel level, BlockPos target) {
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+
+        for (int dy = -3; dy <= 3; dy++) {
+            for (int dx = -4; dx <= 4; dx++) {
+                for (int dz = -4; dz <= 4; dz++) {
+                    double targetDistance = dx * dx + dy * dy + dz * dz;
+                    if (targetDistance > 20.25D) {
+                        continue;
+                    }
+                    BlockPos candidate = target.offset(dx, dy, dz);
+                    if (!isStripMineStandingPosition(level, candidate)) {
+                        continue;
+                    }
+
+                    double workerDistance = distanceToSqr(
+                            candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D);
+                    double verticalPenalty = Math.abs(candidate.getY() - target.getY()) * 8.0D;
+                    double score = targetDistance * 4.0D + workerDistance + verticalPenalty;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = candidate.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private OreAccessPlan findOreAccessPlan(ServerLevel level, BlockPos target, int phase) {
+        BlockPos workerPos = blockPosition();
+        OreAccessPlan best = null;
+        double bestScore = Double.MAX_VALUE;
+
+        for (int dy = -3; dy <= 3; dy++) {
+            for (int dx = -4; dx <= 4; dx++) {
+                for (int dz = -4; dz <= 4; dz++) {
+                    double targetDistance = dx * dx + dy * dy + dz * dz;
+                    if (targetDistance > 20.25D) {
+                        continue;
+                    }
+
+                    BlockPos candidate = target.offset(dx, dy, dz);
+                    if (candidate.equals(target) || candidate.above().equals(target)) {
+                        continue;
+                    }
+                    if (Math.abs(candidate.getY() - workerPos.getY()) > 1) {
+                        continue;
+                    }
+                    int horizontalDistance = Math.abs(candidate.getX() - workerPos.getX())
+                            + Math.abs(candidate.getZ() - workerPos.getZ());
+                    if (horizontalDistance > 2) {
+                        continue;
+                    }
+
+                    List<WorkOrder> helpers = new java.util.ArrayList<>(2);
+                    BlockState feet = level.getBlockState(candidate);
+                    if (!feet.isAir()) {
+                        if (!canClearOreAccessBlock(level, candidate, feet)) {
+                            continue;
+                        }
+                        helpers.add(new WorkOrder(candidate.immutable(), WorkAction.ACCESS_BREAK, null, phase));
+                    }
+
+                    BlockPos headPos = candidate.above();
+                    BlockState head = level.getBlockState(headPos);
+                    if (!head.isAir()) {
+                        if (!canClearOreAccessBlock(level, headPos, head)) {
+                            continue;
+                        }
+                        helpers.add(new WorkOrder(headPos.immutable(), WorkAction.ACCESS_BREAK, null, phase));
+                    }
+
+                    BlockPos floorPos = candidate.below();
+                    BlockState floor = level.getBlockState(floorPos);
+                    if (floor.isAir()) {
+                        BlockPos supportPos = floorPos.below();
+                        BlockState support = level.getBlockState(supportPos);
+                        if (!support.isFaceSturdy(level, supportPos, Direction.UP)) {
+                            continue;
+                        }
+                        helpers.add(new WorkOrder(floorPos.immutable(), WorkAction.PLACE_DIRT, null, phase));
+                    } else if (!floor.isFaceSturdy(level, floorPos, Direction.UP)) {
+                        continue;
+                    }
+
+                    if (helpers.isEmpty() || helpers.size() > 2) {
+                        continue;
+                    }
+
+                    boolean reachableHelpers = true;
+                    for (WorkOrder helper : helpers) {
+                        BlockPos helperPos = helper.pos();
+                        if (distanceToSqr(helperPos.getX() + 0.5D, helperPos.getY() + 0.5D, helperPos.getZ() + 0.5D) > 9.0D) {
+                            reachableHelpers = false;
+                            break;
+                        }
+                    }
+                    if (!reachableHelpers) {
+                        continue;
+                    }
+
+                    double workerDistance = distanceToSqr(
+                            candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D);
+                    double score = helpers.size() * 1000.0D + targetDistance * 10.0D + workerDistance;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = new OreAccessPlan(List.copyOf(helpers));
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean canClearOreAccessBlock(ServerLevel level, BlockPos pos, BlockState state) {
+        return state.getDestroySpeed(level, pos) >= 0.0F
+                && !state.hasBlockEntity()
+                && (state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER));
+    }
+
+    private void prependOreAccess(WorkOrder oreOrder, OreAccessPlan accessPlan) {
+        WorkOrder current = workQueue.pollFirst();
+        if (current == null || !current.equals(oreOrder)) {
+            if (current != null) {
+                workQueue.addFirst(current);
+            }
+            return;
+        }
+
+        workQueue.addFirst(oreOrder);
+        List<WorkOrder> helpers = accessPlan.helpers();
+        for (int i = helpers.size() - 1; i >= 0; i--) {
+            workQueue.addFirst(helpers.get(i));
+        }
+        resetActiveWork();
+        stuckTicks = 0;
+        entityData.set(WORKING, true);
+    }
     private BlockPos findStripMineWorkPosition(ServerLevel level, BlockPos target) {
         BlockPos best = null;
         double bestScore = Double.MAX_VALUE;
@@ -1076,9 +1242,13 @@ public final class MinionEntity extends PathfinderMob {
         PLACE_DIRT,
         PLACE_STAIR,
         PLACE_TORCH,
-        TREE_BREAK
+        TREE_BREAK,
+        ORE_BREAK,
+        ACCESS_BREAK
     }
 
+    private record OreAccessPlan(List<WorkOrder> helpers) {
+    }
     public record WorkOrder(BlockPos pos, WorkAction action, Direction facing, int phase) {
     }
 }

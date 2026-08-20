@@ -2,7 +2,7 @@ name: Patch beta.14 ore access on PR
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, reopened]
     branches:
       - main
 
@@ -43,14 +43,17 @@ jobs:
           from pathlib import Path
           import os
           import re
-          import textwrap
 
           workflow = Path('runner/.github/workflows/run-beta14-ore-access.yml').read_text()
           match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", workflow, re.S)
           if not match:
               raise SystemExit('embedded beta.14 patch script not found')
+          code = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in match.group(1).splitlines()
+          )
           os.chdir('work')
-          exec(compile(textwrap.dedent(match.group(1)), 'beta14_patch.py', 'exec'))
+          exec(compile(code, 'beta14_patch.py', 'exec'))
           PY
 
       - name: Build beta.14

@@ -21,8 +21,11 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
+import java.util.Set;
+
 public final class MastersStaffItem extends Item {
     private static final int HOLD_TICKS = 20;
+    private static final double RECALL_DISTANCE_SQ = 48.0D * 48.0D;
 
     public MastersStaffItem() {
         super(new Item.Properties().stacksTo(1));
@@ -117,9 +120,35 @@ public final class MastersStaffItem extends Item {
             return;
         }
 
+        recallDistantMinions(player);
         BlockPos target = clicked.relative(blockHit.getDirection());
         boolean spawned = MinionManager.spawnOrMove(player, target);
         MinionManager.exhaustBig(player);
         player.displayClientMessage(Component.translatable(spawned ? "message.minions.summon" : "message.minions.move"), true);
+    }
+
+    private static void recallDistantMinions(ServerPlayer player) {
+        int recalled = 0;
+        for (MinionEntity minion : MinionManager.getOwned(player)) {
+            boolean differentDimension = minion.level() != player.level();
+            if (!differentDimension && minion.distanceToSqr(player) <= RECALL_DISTANCE_SQ) {
+                continue;
+            }
+            minion.clearWork();
+            minion.clearMoveTarget();
+            minion.setFollowing(false);
+            minion.releaseChunkLoading();
+            double angle = recalled * (Math.PI / 2.0D);
+            double x = player.getX() + Math.cos(angle) * 1.25D;
+            double z = player.getZ() + Math.sin(angle) * 1.25D;
+            minion.teleportTo(
+                    player.serverLevel(),
+                    x, player.getY(), z,
+                    Set.of(),
+                    player.getYRot(),
+                    player.getXRot()
+            );
+            recalled++;
+        }
     }
 }

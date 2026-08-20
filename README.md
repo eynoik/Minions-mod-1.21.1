@@ -6,7 +6,7 @@ Unofficial port of **AtomicStryker's Minecraft Minions** from Forge 1.12.2 to **
 
 ## Download
 
-**Current version: `2.0.3-1.21.1-beta.14`**
+**Current version: `2.0.3-1.21.1-beta.15`**
 
 - Minecraft **1.21.1**
 - NeoForge **21.1.x**
@@ -17,6 +17,7 @@ Unofficial port of **AtomicStryker's Minecraft Minions** from Forge 1.12.2 to **
 
 - summon up to several Minions and command them with the **Master's Staff**
 - move, follow, stop work and unsummon orders
+- distant Minions are recalled to their owner when summoned again (48+ blocks or another dimension)
 - whole-tree harvesting with normal sapling/apple drops
 - connected vein mining
 - 5x5 spiral mineshafts

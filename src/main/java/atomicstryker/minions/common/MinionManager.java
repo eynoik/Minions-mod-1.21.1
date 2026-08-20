@@ -190,13 +190,15 @@ public final class MinionManager {
 
     public static void exhaustBig(ServerPlayer player) {
         if (!player.isCreative()) {
-            player.causeFoodExhaustion(MinionsConfig.BIG_EXHAUSTION.get().floatValue());
+            double configured = MinionsConfig.BIG_EXHAUSTION.get();
+            player.causeFoodExhaustion((float) (configured == 20.0D ? 15.0D : configured));
         }
     }
 
     public static void exhaustSmall(ServerPlayer player) {
         if (!player.isCreative()) {
-            player.causeFoodExhaustion(MinionsConfig.SMALL_EXHAUSTION.get().floatValue());
+            double configured = MinionsConfig.SMALL_EXHAUSTION.get();
+            player.causeFoodExhaustion((float) (configured == 1.5D ? 1.0D : configured));
         }
     }
 

@@ -31,9 +31,9 @@ public final class MinionsConfig {
         AUTOMATIC_DESPAWN_DELAY = builder.comment("Seconds before a Minion whose owner is offline/dead despawns and drops its inventory. Legacy default: 300.")
                 .defineInRange("automaticDespawnDelay", 300, 0, 3600);
         BIG_EXHAUSTION = builder.comment("Food exhaustion for expensive staff orders.")
-                .defineInRange("foodCostBig", 20.0D, 0.0D, 100.0D);
+                .defineInRange("foodCostBig", 15.0D, 0.0D, 100.0D);
         SMALL_EXHAUSTION = builder.comment("Food exhaustion for small staff actions.")
-                .defineInRange("foodCostSmall", 1.5D, 0.0D, 20.0D);
+                .defineInRange("foodCostSmall", 1.0D, 0.0D, 20.0D);
         builder.pop();
 
         builder.push("jobs");

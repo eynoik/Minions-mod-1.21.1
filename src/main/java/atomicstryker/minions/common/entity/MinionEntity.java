@@ -1,5 +1,6 @@
 package atomicstryker.minions.common.entity;
 
+import atomicstryker.minions.MinionsMod;
 import atomicstryker.minions.common.MinionManager;
 import atomicstryker.minions.common.MinionsConfig;
 import atomicstryker.minions.registry.MinionsSounds;
@@ -36,6 +37,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -51,6 +53,7 @@ import java.util.Queue;
 import java.util.UUID;
 
 public final class MinionEntity extends PathfinderMob {
+    private static final int NO_FORCED_CHUNK = Integer.MIN_VALUE;
     private static final EntityDataAccessor<String> MASTER_NAME = SynchedEntityData.defineId(
             MinionEntity.class,
             EntityDataSerializers.STRING
@@ -77,6 +80,9 @@ public final class MinionEntity extends PathfinderMob {
     private boolean inventoryFull;
     private boolean forceReturnGoods;
     private boolean stripMining;
+    private int forcedChunkX = NO_FORCED_CHUNK;
+    private int forcedChunkZ = NO_FORCED_CHUNK;
+    private int forcedChunkRadius = -1;
     private WorkOrder activeOrder;
     private List<BlockPos> activeTreeLogs = List.of();
     private List<BlockPos> activeTreeLeaves = List.of();
@@ -313,6 +319,8 @@ public final class MinionEntity extends PathfinderMob {
             return;
         }
 
+        updateChunkLoading(serverLevel);
+
         if (workBoostTicks > 0) {
             workBoostTicks--;
         }
@@ -354,6 +362,54 @@ public final class MinionEntity extends PathfinderMob {
         }
     }
 
+    private void updateChunkLoading(ServerLevel level) {
+        int radius = needsWorkAreaChunkLoading() ? 1 : 0;
+        ChunkPos current = chunkPosition();
+        if (forcedChunkX == current.x && forcedChunkZ == current.z && forcedChunkRadius == radius) {
+            return;
+        }
+
+        releaseChunkLoading(level);
+        setChunkAreaForced(level, current.x, current.z, radius, true);
+        forcedChunkX = current.x;
+        forcedChunkZ = current.z;
+        forcedChunkRadius = radius;
+    }
+
+    private boolean needsWorkAreaChunkLoading() {
+        return !workQueue.isEmpty()
+                || moveTarget != null
+                || carryTargetUUID != null
+                || inventoryFull
+                || forceReturnGoods
+                || (!inventory.isEmpty() && returnContainer != null);
+    }
+
+    private void setChunkAreaForced(ServerLevel level, int centerX, int centerZ, int radius, boolean add) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                MinionsMod.MINION_CHUNK_TICKETS.forceChunk(
+                        level, getUUID(), centerX + dx, centerZ + dz, add, true);
+            }
+        }
+    }
+
+    public void releaseChunkLoading() {
+        if (level() instanceof ServerLevel serverLevel) {
+            releaseChunkLoading(serverLevel);
+        }
+    }
+
+    private void releaseChunkLoading(ServerLevel level) {
+        if (forcedChunkRadius < 0 || forcedChunkX == NO_FORCED_CHUNK || forcedChunkZ == NO_FORCED_CHUNK) {
+            return;
+        }
+        setChunkAreaForced(level, forcedChunkX, forcedChunkZ, forcedChunkRadius, false);
+        forcedChunkX = NO_FORCED_CHUNK;
+        forcedChunkZ = NO_FORCED_CHUNK;
+        forcedChunkRadius = -1;
+    }
+
     private void tickOwnerDespawn(ServerLevel level) {
         ServerPlayer owner = getOwner(level);
         if (owner != null && owner.isAlive()) {
@@ -365,6 +421,7 @@ public final class MinionEntity extends PathfinderMob {
         int delayTicks = MinionsConfig.AUTOMATIC_DESPAWN_DELAY.get() * 20;
         if (ownerMissingTicks >= delayTicks) {
             dropStoredItems();
+            releaseChunkLoading(level);
             discard();
         }
     }
@@ -490,6 +547,17 @@ public final class MinionEntity extends PathfinderMob {
             // Pick a two-block-tall air position in the already opened tunnel
             // that remains inside the normal three-block work reach instead.
             navigationTarget = findStripMineWorkPosition(level, target);
+            if (navigationTarget == null) {
+                // beta.12 fell back to the Minion's own position here. Vanilla
+                // navigation could report that as success forever, so the stall
+                // counter never reached recovery and the queue froze on one block.
+                navigation.stop();
+                stuckTicks++;
+                if (stuckTicks > 40) {
+                    completeCurrentOrder(level);
+                }
+                return;
+            }
         } else {
             navigationTarget = target;
         }
@@ -514,6 +582,10 @@ public final class MinionEntity extends PathfinderMob {
                     safe = findTreeWorkPosition(level, target);
                 } else if (stripMining) {
                     safe = findStripMineWorkPosition(level, target);
+                    if (safe == null) {
+                        completeCurrentOrder(level);
+                        return;
+                    }
                 } else {
                     safe = findSafeTeleport(level, target);
                 }
@@ -843,10 +915,10 @@ public final class MinionEntity extends PathfinderMob {
             }
         }
 
-        // Never fall back to the generic upward recovery scan for strip mining.
-        // If a valid tunnel access cell does not exist yet, staying put is safer
-        // than walking to the surface and teleporting down again.
-        return best == null ? blockPosition().immutable() : best;
+        // Null means the order is currently unreachable from any legal tunnel
+        // standing cell. tickWork counts that as a real stall instead of pathing
+        // to the Minion's own position forever.
+        return best;
     }
 
     private boolean isStripMineStandingPosition(ServerLevel level, BlockPos candidate) {
@@ -871,6 +943,7 @@ public final class MinionEntity extends PathfinderMob {
         // empty it into the world before the entity death/removal sequence.
         if (!level().isClientSide) {
             dropStoredItems();
+            releaseChunkLoading();
         }
         super.die(source);
     }

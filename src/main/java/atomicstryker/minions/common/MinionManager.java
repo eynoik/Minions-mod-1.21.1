@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.common.Tags;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 
 import java.util.ArrayDeque;
@@ -177,6 +178,7 @@ public final class MinionManager {
     public static void unsummon(ServerPlayer player) {
         for (MinionEntity minion : new ArrayList<>(getOwned(player))) {
             minion.dropStoredItems();
+            minion.releaseChunkLoading();
             minion.discard();
             LOADED_MINIONS.remove(minion);
         }
@@ -582,25 +584,9 @@ public final class MinionManager {
 
     private static boolean isValuable(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
-        if (state.isAir() || state.getDestroySpeed(level, pos) < 0.0F) {
-            return false;
-        }
-        return !state.is(BlockTags.BASE_STONE_OVERWORLD)
-                && !state.is(BlockTags.BASE_STONE_NETHER)
-                && !state.is(BlockTags.DIRT)
-                && !state.is(BlockTags.SAND)
-                && !state.is(BlockTags.LOGS)
-                && !state.is(BlockTags.LEAVES)
-                && !state.is(Blocks.GRAVEL)
-                && !state.is(Blocks.COBBLESTONE)
-                && !state.is(Blocks.OBSIDIAN)
-                && !state.is(Blocks.BEDROCK)
-                && !state.is(Blocks.SNOW)
-                && !state.is(Blocks.SNOW_BLOCK)
-                && !state.is(Blocks.SOUL_SAND)
-                && !state.is(Blocks.SOUL_SOIL)
-                && !state.is(Blocks.CHEST)
-                && !state.is(Blocks.TORCH);
+        return !state.isAir()
+                && state.getDestroySpeed(level, pos) >= 0.0F
+                && state.is(Tags.Blocks.ORES);
     }
 
     private static boolean isStairwellCorner(int depth, int segment, int xDiff, int zDiff) {

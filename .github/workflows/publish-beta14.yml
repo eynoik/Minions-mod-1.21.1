@@ -1,0 +1,50 @@
+name: Publish beta.14 prerelease
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-beta14.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout beta.14 source
+        uses: actions/checkout@v4
+        with:
+          ref: 48138d6ba6576ba0fa8ff4d5e8c1b11825fde72c
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Build beta.14
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew build --stacktrace
+
+      - name: Create beta.14 prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: 2.0.3-1.21.1-beta.14
+          RELEASE_TARGET: 48138d6ba6576ba0fa8ff4d5e8c1b11825fde72c
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="build/libs/minions-2.0.3-1.21.1-beta.14.jar"
+          test -f "$JAR"
+          gh release create "$TAG" "$JAR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_TARGET" \
+            --title "Minions 1.21.1 — beta.14" \
+            --notes "Strip-mine ore access fix. Ore branches now use dedicated ORE_BREAK tasks with a player-like 4.5-block work reach, so ores several blocks above the 1x2 tunnel can be mined without freezing the job. If no normal standing cell exists, a Minion may make at most two bounded access changes: clear only ordinary overworld/nether base-stone blocks and/or fill a one-block-deep hole with dirt. It will not clear block entities, sculk or arbitrary modded blocks, and it will not bridge deep gaps. If safe access still cannot be made, only that ore task is skipped and the main strip mine continues. Includes beta.13 c:ores filtering and chunk loading fixes." \
+            --prerelease

@@ -41,6 +41,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -171,6 +172,10 @@ public final class MinionEntity extends PathfinderMob {
     }
     public void enqueueOreWork(BlockPos pos, int phase) {
         enqueue(new WorkOrder(pos.immutable(), WorkAction.ORE_BREAK, null, phase));
+    }
+
+    public void enqueueShaftWork(BlockPos pos, int phase) {
+        enqueue(new WorkOrder(pos.immutable(), WorkAction.SHAFT_BREAK, null, phase));
     }
 
     public void enqueueTreeWork(BlockPos pos) {
@@ -521,8 +526,20 @@ public final class MinionEntity extends PathfinderMob {
             if (order.action() == WorkAction.TREE_BREAK) {
                 harvestWholeTreeIntoInventory(level);
             } else if (isBreakAction(order.action())) {
-                harvestBlockIntoInventory(level, target, state);
-            } else {
+      harvestBlockIntoInventory(level, target, state);
+      if (order.action() == WorkAction.SHAFT_BREAK) {
+          // Removing a shaft support can schedule gravel/sand above it to
+          // fall a moment later. Do not retire this coordinate while a
+          // gravity block is directly above; keep revisiting the same cell
+          // so the falling material gets mined instead of clogging the shaft.
+          BlockState above = level.getBlockState(target.above());
+          if (above.getBlock() instanceof FallingBlock) {
+              workTicks = 0;
+              stuckTicks = 0;
+              return;
+          }
+      }
+  } else {
                 if (!state.isAir()) {
                     harvestBlockIntoInventory(level, target, state);
                 }
@@ -621,7 +638,8 @@ public final class MinionEntity extends PathfinderMob {
         return action == WorkAction.BREAK
                 || action == WorkAction.TREE_BREAK
                 || action == WorkAction.ORE_BREAK
-                || action == WorkAction.ACCESS_BREAK;
+                || action == WorkAction.ACCESS_BREAK
+                || action == WorkAction.SHAFT_BREAK;
     }
     private void adaptWorkingTool(BlockState state, WorkAction action) {
         if (!isBreakAction(action)) {
@@ -728,7 +746,7 @@ public final class MinionEntity extends PathfinderMob {
 
     private BlockState desiredState(WorkOrder order) {
         return switch (order.action()) {
-            case BREAK, TREE_BREAK, ORE_BREAK, ACCESS_BREAK -> null;
+            case BREAK, TREE_BREAK, ORE_BREAK, ACCESS_BREAK, SHAFT_BREAK -> null;
             case PLACE_COBBLE -> Blocks.COBBLESTONE.defaultBlockState();
             case PLACE_DIRT -> Blocks.DIRT.defaultBlockState();
             case PLACE_TORCH -> Blocks.TORCH.defaultBlockState();
@@ -1244,7 +1262,8 @@ public final class MinionEntity extends PathfinderMob {
         PLACE_TORCH,
         TREE_BREAK,
         ORE_BREAK,
-        ACCESS_BREAK
+        ACCESS_BREAK,
+        SHAFT_BREAK
     }
 
     private record OreAccessPlan(List<WorkOrder> helpers) {

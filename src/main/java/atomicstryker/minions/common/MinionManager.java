@@ -493,35 +493,46 @@ public final class MinionManager {
         int minY = level.getMinBuildHeight() + 8;
 
         for (int depth = 0; startY - depth > minY; depth++) {
-            if (depth % 3 == 0) {
-                currentSegment++;
-                if (currentSegment == 5) {
-                    currentSegment = 1;
-                }
-            }
+  if (depth % 3 == 0) {
+      currentSegment++;
+      if (currentSegment == 5) {
+          currentSegment = 1;
+      }
+  }
 
-            int y = startY - depth;
-            for (int xDiff = 0; xDiff <= 4; xDiff++) {
-                for (int zDiff = 0; zDiff <= 4; zDiff++) {
-                    BlockPos pos = start.offset(xDiff, -depth, zDiff);
-                    if (isStairwellCorner(depth, currentSegment, xDiff, zDiff)) {
-                        work.add(QueuedWork.placeCobble(pos, depth + 1));
-                    } else {
-                        Direction stairFacing = stairFacing(depth, currentSegment, xDiff, zDiff);
-                        if (stairFacing != null) {
-                            work.add(QueuedWork.placeStair(pos, stairFacing, depth + 1));
-                        } else if (!level.getBlockState(pos).isAir()) {
-                            work.add(QueuedWork.breakBlock(pos, depth + 1));
-                        }
-                    }
-                }
-            }
+  int clearPhase = depth * 2 + 1;
+  int buildPhase = clearPhase + 1;
+  List<QueuedWork> buildLayer = new ArrayList<>();
+
+  // Clear the complete 5x5 layer first, including future stair/cobble cells.
+  // SHAFT_BREAK is gravity-aware: if gravel/sand is sitting directly above
+  // a removed support block, the Minion keeps the same order alive until
+  // the falling column has settled into that cell and has been cleared.
+  for (int xDiff = 0; xDiff <= 4; xDiff++) {
+      for (int zDiff = 0; zDiff <= 4; zDiff++) {
+          BlockPos pos = start.offset(xDiff, -depth, zDiff);
+          work.add(QueuedWork.shaftBreak(pos, clearPhase));
+
+          if (isStairwellCorner(depth, currentSegment, xDiff, zDiff)) {
+              buildLayer.add(QueuedWork.placeCobble(pos, buildPhase));
+          } else {
+              Direction stairFacing = stairFacing(depth, currentSegment, xDiff, zDiff);
+              if (stairFacing != null) {
+                  buildLayer.add(QueuedWork.placeStair(pos, stairFacing, buildPhase));
+              }
+          }
+      }
+  }
+
+  // Only build after every Minion has finished clearing and settling this
+  // layer. The next depth cannot start until the build phase is complete.
+  work.addAll(buildLayer);
         }
 
         assignOrders(player, work);
         if (!work.isEmpty()) {
-            playOrder(player, MinionsSounds.ORDER_MINESHAFT.get());
-            exhaustBig(player);
+  playOrder(player, MinionsSounds.ORDER_MINESHAFT.get());
+  exhaustBig(player);
         }
     }
 
@@ -659,6 +670,7 @@ public final class MinionManager {
             MinionEntity worker = minions.get(index++ % minions.size());
             switch (order.action) {
                 case BREAK -> worker.enqueueWork(order.pos, order.phase);
+                case SHAFT_BREAK -> worker.enqueueShaftWork(order.pos, order.phase);
                 case COBBLE -> worker.enqueuePlaceCobble(order.pos, order.phase);
                 case DIRT -> worker.enqueuePlaceDirt(order.pos, order.phase);
                 case STAIR -> worker.enqueuePlaceStair(order.pos, order.facing, order.phase);
@@ -692,6 +704,7 @@ public final class MinionManager {
 
     private enum OrderAction {
         BREAK,
+        SHAFT_BREAK,
         COBBLE,
         DIRT,
         STAIR,
@@ -705,6 +718,10 @@ public final class MinionManager {
 
         private static QueuedWork breakBlock(BlockPos pos, int phase) {
             return new QueuedWork(pos.immutable(), OrderAction.BREAK, null, phase);
+        }
+
+        private static QueuedWork shaftBreak(BlockPos pos, int phase) {
+            return new QueuedWork(pos.immutable(), OrderAction.SHAFT_BREAK, null, phase);
         }
 
         private static QueuedWork placeCobble(BlockPos pos, int phase) {

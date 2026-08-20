@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
 
+# second commit intentionally triggers this one-shot workflow
 jobs:
   refine:
     runs-on: ubuntu-latest

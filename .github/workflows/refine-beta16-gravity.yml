@@ -10,7 +10,6 @@ on:
 permissions:
   contents: write
 
-# second commit intentionally triggers this one-shot workflow
 jobs:
   refine:
     runs-on: ubuntu-latest
@@ -44,8 +43,7 @@ jobs:
               s = s.replace(old, new, 1)
 
           if 'private boolean shaftWaitingForGravity;' not in s:
-              one(
-                  '    private int workBoostTicks;\n',
+              one('    private int workBoostTicks;\n',
                   '    private int workBoostTicks;\n    private int shaftGravityWaitTicks;\n    private boolean shaftWaitingForGravity;\n',
                   'gravity fields')
 
@@ -98,8 +96,7 @@ jobs:
               one(old_retention, new_retention, 'gravity retention')
 
           if 'shaftGravityWaitTicks = 0;\n        shaftWaitingForGravity = false;\n        entityData.set(WORKING, false);' not in s:
-              one(
-                  '''        workTicks = 0;
+              one('''        workTicks = 0;
         stuckTicks = 0;
         entityData.set(WORKING, false);''',
                   '''        workTicks = 0;
@@ -110,8 +107,7 @@ jobs:
                   'complete reset')
 
           if 'workTicks = 0;\n        shaftGravityWaitTicks = 0;\n        shaftWaitingForGravity = false;\n    }\n\n    private BlockState desiredState' not in s:
-              one(
-                  '''        activeTreeLeaves = List.of();
+              one('''        activeTreeLeaves = List.of();
         workTicks = 0;
     }
 
@@ -145,4 +141,26 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "Wait for falling blocks to settle in mineshafts"
             git push origin HEAD:agent/beta16-gravel-shaft
+          fi
+
+      - name: Record refine result
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          HAS_WAIT=0
+          if grep -q 'private boolean shaftWaitingForGravity;' src/main/java/atomicstryker/minions/common/entity/MinionEntity.java; then
+            HAS_WAIT=1
+          fi
+          git fetch origin main
+          git checkout -B main origin/main
+          mkdir -p .github
+          printf 'result=%s\nhas_wait=%s\n' "$RESULT" "$HAS_WAIT" > .github/beta16-refine-status
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- .github/beta16-refine-status
+          if ! git diff --cached --quiet; then
+            git commit -m "Record beta.16 refine status"
+            git push origin main
           fi

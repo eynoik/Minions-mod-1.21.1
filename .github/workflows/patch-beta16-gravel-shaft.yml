@@ -6,12 +6,17 @@ on:
       - main
     paths:
       - '.github/workflows/patch-beta16-gravel-shaft.yml'
+  pull_request:
+    types: [opened]
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch-build:
+    if: github.event_name == 'push' || github.head_ref == 'agent/beta16-gravel-shaft'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout beta.16 branch
@@ -122,10 +127,6 @@ jobs:
               '    public void enqueueOreWork(BlockPos pos, int phase) {\n        enqueue(new WorkOrder(pos.immutable(), WorkAction.ORE_BREAK, null, phase));\n    }\n\n    public void enqueueShaftWork(BlockPos pos, int phase) {\n        enqueue(new WorkOrder(pos.immutable(), WorkAction.SHAFT_BREAK, null, phase));\n    }',
               'shaft enqueue')
           s = replace_once(s,
-              '        if (isBreakAction(order.action())) {\n            if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {\n                completeCurrentOrder(level);\n                return;\n            }\n        } else {',
-              '        if (isBreakAction(order.action())) {\n            if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {\n                completeCurrentOrder(level);\n                return;\n            }\n        } else {',
-              'break validation anchor')
-          s = replace_once(s,
               '            } else if (isBreakAction(order.action())) {\n                harvestBlockIntoInventory(level, target, state);\n            } else {',
               '''            } else if (isBreakAction(order.action())) {
                 harvestBlockIntoInventory(level, target, state);
@@ -184,5 +185,7 @@ jobs:
             src/main/java/atomicstryker/minions/common/MinionManager.java \
             src/main/java/atomicstryker/minions/common/entity/MinionEntity.java \
             gradle.properties README.md
-          git commit -m "Handle falling gravel in mineshafts"
-          git push origin HEAD:agent/beta16-gravel-shaft
+          if ! git diff --cached --quiet; then
+            git commit -m "Handle falling gravel in mineshafts"
+            git push origin HEAD:agent/beta16-gravel-shaft
+          fi

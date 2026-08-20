@@ -6,7 +6,7 @@ Unofficial port of **AtomicStryker's Minecraft Minions** from Forge 1.12.2 to **
 
 ## Download
 
-**Current version: `2.0.3-1.21.1-beta.12`**
+**Current version: `2.0.3-1.21.1-beta.13`**
 
 - Minecraft **1.21.1**
 - NeoForge **21.1.x**
@@ -20,7 +20,8 @@ Unofficial port of **AtomicStryker's Minecraft Minions** from Forge 1.12.2 to **
 - whole-tree harvesting with normal sapling/apple drops
 - connected vein mining
 - 5x5 spiral mineshafts
-- 1x2 strip mining with ore scanning, floor repair and torches
+- 1x2 strip mining with common `c:ores` scanning, stall recovery, floor repair and torches
+- active Minions keep their work area loaded while operating away from players
 - custom-size area digging with an in-world selection grid
 - 24-slot Minion backpack with automatic return to a chest or owner
 - Minions can carry mobs and players
@@ -34,7 +35,6 @@ Unofficial port of **AtomicStryker's Minecraft Minions** from Forge 1.12.2 to **
 - `M` — open the Minions menu
 - right-click air with the Master's Staff — give your Minions a 30-second 2x work-speed boost
 - right-click a block — summon a missing Minion or move your Minions
-- right-click a log — harvest nearby trees
 - `Shift` + right-click a block — mine a connected vein
 - hold right-click — follow player
 - `Shift` + hold right-click — unsummon Minions

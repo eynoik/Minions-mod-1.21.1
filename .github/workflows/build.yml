@@ -17,18 +17,10 @@ jobs:
     if: github.event_name == 'pull_request' && github.head_ref == 'agent/beta16-gravel-shaft'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout patch source
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: runner
-          fetch-depth: 1
-
       - name: Checkout beta.16 branch
         uses: actions/checkout@v4
         with:
           ref: agent/beta16-gravel-shaft
-          path: work
           fetch-depth: 0
 
       - name: Set up Java 21
@@ -37,49 +29,117 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
-          cache-dependency-path: work/gradle/wrapper/gradle-wrapper.properties
 
-      - name: Apply beta.16 source patch
+      - name: Add real falling-block settle wait
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import os
-          import re
 
-          workflow = Path('runner/.github/workflows/patch-beta16-gravel-shaft.yml').read_text()
-          match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", workflow, re.S)
-          if not match:
-              raise SystemExit('embedded beta.16 patch script not found')
-          code = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in match.group(1).splitlines()
-          )
-          os.chdir('work')
-          exec(compile(code, 'beta16_patch.py', 'exec'))
+          p = Path('src/main/java/atomicstryker/minions/common/entity/MinionEntity.java')
+          s = p.read_text()
+
+          def one(old, new, label):
+              global s
+              if old not in s:
+                  raise SystemExit(f'{label}: marker not found')
+              s = s.replace(old, new, 1)
+
+          one(
+              '    private int workBoostTicks;\n',
+              '    private int workBoostTicks;\n    private int shaftGravityWaitTicks;\n    private boolean shaftWaitingForGravity;\n',
+              'gravity fields')
+
+          one(
+              '''        if (isBreakAction(order.action())) {
+            if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
+                completeCurrentOrder(level);
+                return;
+            }
+        } else {''',
+              '''        if (isBreakAction(order.action())) {
+            if (order.action() == WorkAction.SHAFT_BREAK && shaftWaitingForGravity) {
+                if (state.isAir()) {
+                    shaftGravityWaitTicks++;
+                    if (shaftGravityWaitTicks < 10) {
+                        entityData.set(WORKING, false);
+                        navigation.stop();
+                        return;
+                    }
+                    shaftWaitingForGravity = false;
+                    shaftGravityWaitTicks = 0;
+                    completeCurrentOrder(level);
+                    return;
+                }
+                shaftWaitingForGravity = false;
+                shaftGravityWaitTicks = 0;
+            }
+            if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
+                completeCurrentOrder(level);
+                return;
+            }
+        } else {''',
+              'gravity validation')
+
+          old = '''          BlockState above = level.getBlockState(target.above());
+          if (above.getBlock() instanceof FallingBlock) {
+              workTicks = 0;
+              stuckTicks = 0;
+              return;
+          }'''
+          new = '''          BlockState above = level.getBlockState(target.above());
+          if (above.getBlock() instanceof FallingBlock || state.getBlock() instanceof FallingBlock) {
+              shaftWaitingForGravity = true;
+              shaftGravityWaitTicks = 0;
+              workTicks = 0;
+              stuckTicks = 0;
+              return;
+          }'''
+          one(old, new, 'gravity retention')
+
+          one(
+              '''        workTicks = 0;
+        stuckTicks = 0;
+        entityData.set(WORKING, false);''',
+              '''        workTicks = 0;
+        stuckTicks = 0;
+        shaftGravityWaitTicks = 0;
+        shaftWaitingForGravity = false;
+        entityData.set(WORKING, false);''',
+              'complete reset')
+
+          one(
+              '''        activeTreeLeaves = List.of();
+        workTicks = 0;
+    }
+
+    private BlockState desiredState''',
+              '''        activeTreeLeaves = List.of();
+        workTicks = 0;
+        shaftGravityWaitTicks = 0;
+        shaftWaitingForGravity = false;
+    }
+
+    private BlockState desiredState''',
+              'active reset')
+
+          p.write_text(s)
           PY
 
-      - name: Build patched beta.16
-        working-directory: work
+      - name: Build refined beta.16
         shell: bash
         run: |
           chmod +x gradlew
           ./gradlew build --stacktrace
 
-      - name: Commit patched source
-        working-directory: work
+      - name: Commit refined beta.16
         shell: bash
         run: |
-          rm -f .github/beta16-trigger
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- \
-            src/main/java/atomicstryker/minions/common/MinionManager.java \
-            src/main/java/atomicstryker/minions/common/entity/MinionEntity.java \
-            gradle.properties README.md
-          git add -u -- .github/beta16-trigger
+          git add -- src/main/java/atomicstryker/minions/common/entity/MinionEntity.java
           if ! git diff --cached --quiet; then
-            git commit -m "Handle falling gravel in mineshafts"
+            git commit -m "Wait for falling blocks to settle in mineshafts"
             git push origin HEAD:agent/beta16-gravel-shaft
           fi
 

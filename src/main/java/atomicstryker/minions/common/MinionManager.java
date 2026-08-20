@@ -572,7 +572,7 @@ public final class MinionManager {
             return;
         }
         for (BlockPos pos : floodMatching(level, start, Math.min(64, MinionsConfig.MAX_VEIN_BLOCKS.get()), false)) {
-            queueBreak(worker, queued, pos, phase);
+            queueOreBreak(worker, queued, pos, phase);
         }
     }
 
@@ -582,6 +582,11 @@ public final class MinionManager {
         }
     }
 
+    private static void queueOreBreak(MinionEntity worker, Set<BlockPos> queued, BlockPos pos, int phase) {
+        if (queued.add(pos.immutable())) {
+            worker.enqueueOreWork(pos, phase);
+        }
+    }
     private static boolean isValuable(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         return !state.isAir()

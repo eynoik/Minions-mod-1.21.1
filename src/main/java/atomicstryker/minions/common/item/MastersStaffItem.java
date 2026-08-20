@@ -7,7 +7,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -108,13 +107,6 @@ public final class MastersStaffItem extends Item {
         if (!MinionManager.canUsePower(player)) {
             level.playSound(null, player.blockPosition(), MinionsSounds.FART.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
             player.displayClientMessage(Component.translatable("message.minions.no_willpower"), true);
-            return;
-        }
-
-        if (level.getBlockState(clicked).is(BlockTags.LOGS) && MinionManager.hasMinions(player)) {
-            if (MinionManager.chopTree(player, clicked)) {
-                player.displayClientMessage(Component.translatable("message.minions.chop"), true);
-            }
             return;
         }
 

@@ -1,0 +1,77 @@
+name: Patch beta.14 ore access on PR
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    if: github.head_ref == 'agent/beta14-stripmine-ore-access'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main workflow source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: runner
+          fetch-depth: 1
+
+      - name: Checkout beta.14 work branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/beta14-stripmine-ore-access
+          path: work
+          fetch-depth: 0
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: work/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Apply embedded beta.14 patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import textwrap
+
+          workflow = Path('runner/.github/workflows/run-beta14-ore-access.yml').read_text()
+          match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", workflow, re.S)
+          if not match:
+              raise SystemExit('embedded beta.14 patch script not found')
+          os.chdir('work')
+          exec(compile(textwrap.dedent(match.group(1)), 'beta14_patch.py', 'exec'))
+          PY
+
+      - name: Build beta.14
+        working-directory: work
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew build --stacktrace
+
+      - name: Commit beta.14 source
+        working-directory: work
+        shell: bash
+        run: |
+          rm -f .github/beta14-trigger
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            src/main/java/atomicstryker/minions/common/entity/MinionEntity.java \
+            src/main/java/atomicstryker/minions/common/MinionManager.java \
+            gradle.properties \
+            README.md
+          git add -u -- .github/beta14-trigger
+          git commit -m "Improve strip mine ore access"
+          git push origin HEAD:agent/beta14-stripmine-ore-access

@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
 
+# second commit intentionally triggers publication
 jobs:
   release:
     runs-on: ubuntu-latest

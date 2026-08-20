@@ -78,6 +78,8 @@ public final class MinionEntity extends PathfinderMob {
     private int ownerMissingTicks;
     private int workTicks;
     private int workBoostTicks;
+    private int shaftGravityWaitTicks;
+    private boolean shaftWaitingForGravity;
     private boolean inventoryFull;
     private boolean forceReturnGoods;
     private boolean stripMining;
@@ -460,10 +462,26 @@ public final class MinionEntity extends PathfinderMob {
         BlockPos target = order.pos();
         BlockState state = level.getBlockState(target);
         if (isBreakAction(order.action())) {
-            if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
-                completeCurrentOrder(level);
-                return;
-            }
+  if (order.action() == WorkAction.SHAFT_BREAK && shaftWaitingForGravity) {
+      if (state.isAir()) {
+          shaftGravityWaitTicks++;
+          if (shaftGravityWaitTicks < 10) {
+              entityData.set(WORKING, false);
+              navigation.stop();
+              return;
+          }
+          shaftWaitingForGravity = false;
+          shaftGravityWaitTicks = 0;
+          completeCurrentOrder(level);
+          return;
+      }
+      shaftWaitingForGravity = false;
+      shaftGravityWaitTicks = 0;
+  }
+  if (state.isAir() || state.getDestroySpeed(level, target) < 0.0F) {
+      completeCurrentOrder(level);
+      return;
+  }
         } else {
             BlockState desired = desiredState(order);
             if (desired == null) {
@@ -533,7 +551,9 @@ public final class MinionEntity extends PathfinderMob {
           // gravity block is directly above; keep revisiting the same cell
           // so the falling material gets mined instead of clogging the shaft.
           BlockState above = level.getBlockState(target.above());
-          if (above.getBlock() instanceof FallingBlock) {
+          if (above.getBlock() instanceof FallingBlock || state.getBlock() instanceof FallingBlock) {
+              shaftWaitingForGravity = true;
+              shaftGravityWaitTicks = 0;
               workTicks = 0;
               stuckTicks = 0;
               return;
@@ -725,6 +745,8 @@ public final class MinionEntity extends PathfinderMob {
         activeTreeLeaves = List.of();
         workTicks = 0;
         stuckTicks = 0;
+        shaftGravityWaitTicks = 0;
+        shaftWaitingForGravity = false;
         entityData.set(WORKING, false);
         if (workQueue.isEmpty()) {
             stripMining = false;
@@ -742,6 +764,8 @@ public final class MinionEntity extends PathfinderMob {
         activeTreeLogs = List.of();
         activeTreeLeaves = List.of();
         workTicks = 0;
+        shaftGravityWaitTicks = 0;
+        shaftWaitingForGravity = false;
     }
 
     private BlockState desiredState(WorkOrder order) {

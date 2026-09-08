@@ -38,8 +38,10 @@ public final class TextureOptionsScreen extends Screen {
                     b.setMessage(targetLabel());
                 }).bounds(center - 130, y + row * 4, 260, 20).build());
 
-        addRenderableWidget(Button.builder(Component.translatable("screen.minions.options.reset"), b -> options.reset())
-                .bounds(center - 130, y + row * 5, 125, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.options.reset"), b -> {
+                    options.reset();
+                    minecraft.setScreen(new TextureOptionsScreen(parent));
+                }).bounds(center - 130, y + row * 5, 125, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.options.done"), b -> minecraft.setScreen(parent))
                 .bounds(center + 5, y + row * 5, 125, 20).build());
     }

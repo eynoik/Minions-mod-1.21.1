@@ -21,6 +21,7 @@ public record SurfaceWorkPayload(
         int patchSize,
         int patchStrength,
         boolean surfaceOnly,
+        boolean fillAir,
         int targetMode,
         int weatherStrength,
         int groundBias,
@@ -42,6 +43,7 @@ public record SurfaceWorkPayload(
                 buf.writeVarInt(payload.patchSize);
                 buf.writeVarInt(payload.patchStrength);
                 buf.writeBoolean(payload.surfaceOnly);
+                buf.writeBoolean(payload.fillAir);
                 buf.writeVarInt(payload.targetMode);
                 buf.writeVarInt(payload.weatherStrength);
                 buf.writeVarInt(payload.groundBias);
@@ -64,6 +66,7 @@ public record SurfaceWorkPayload(
                         buf.readVarInt(),
                         buf.readVarInt(),
                         buf.readBoolean(),
+                        buf.readBoolean(),
                         buf.readVarInt(),
                         buf.readVarInt(),
                         buf.readVarInt(),
@@ -85,7 +88,7 @@ public record SurfaceWorkPayload(
 
         SurfaceWorkJob.Result result = SurfaceWorkJob.start(
                 player, operation, firstCorner, secondCorner, materialChest,
-                coverage, patchSize, patchStrength, surfaceOnly, targetMode,
+                coverage, patchSize, patchStrength, surfaceOnly, fillAir, targetMode,
                 weatherStrength, groundBias, waterBias, skyBias, waterRadius
         );
 

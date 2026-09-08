@@ -98,6 +98,7 @@ public record SurfaceWorkPayload(
             case EMPTY_PALETTE -> "message.minions.surface_empty_palette";
             case NO_MINIONS -> "message.minions.no_minions";
             case NO_TARGETS -> "message.minions.surface_no_targets";
+            case MATERIALS_CHANGED -> "message.minions.surface_materials_changed";
         };
         player.displayClientMessage(Component.translatable(message), true);
     }

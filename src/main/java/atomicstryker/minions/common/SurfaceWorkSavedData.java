@@ -26,9 +26,11 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,10 +45,11 @@ public final class SurfaceWorkSavedData extends SavedData {
     /**
      * Every pending entry owns exactly one already-reserved replacement block.
      * The item is removed from the selected palette chest before Minions start
-     * breaking anything. This makes texturing transactional: taking items from
-     * the chest mid-job cannot produce holes or duplicate the original block.
+     * working. Entries whose original state is air are Fill Air build orders;
+     * they are never placed automatically and wait for a Minion to reach them.
      */
     private final List<PendingReplacement> pending = new ArrayList<>();
+    private final Map<UUID, BuilderProgress> builderProgress = new HashMap<>();
 
     public SurfaceWorkSavedData() {
     }
@@ -82,9 +85,8 @@ public final class SurfaceWorkSavedData extends SavedData {
     }
 
     /**
-     * Cancelling is safe even if a Minion broke a target on this same tick:
-     * already-air targets receive their reserved replacement, while untouched
-     * targets return their reservation to the palette chest.
+     * Cancelling is safe even if a Minion broke a replacement target on this
+     * same tick. Fill Air orders are simply refunded if they were not built yet.
      */
     public static void cancel(ServerPlayer player) {
         SurfaceWorkSavedData data = get(player.serverLevel());
@@ -116,10 +118,22 @@ public final class SurfaceWorkSavedData extends SavedData {
         while (iterator.hasNext()) {
             PendingReplacement order = iterator.next();
             owners.add(order.owner);
+            BlockState current = level.getBlockState(order.pos);
+
+            if (order.original.isAir()) {
+                // Fill Air is a real build task. If somebody else occupied the
+                // cell before a Minion got there, do not overwrite it.
+                if (!current.isAir()) {
+                    returnReservedMaterial(level, order);
+                    iterator.remove();
+                    changed = true;
+                }
+                continue;
+            }
 
             // A normal Minion BREAK order creates the air cell. Only then do we
             // spend the already-reserved material by placing the desired state.
-            if (!level.getBlockState(order.pos).isAir()) {
+            if (!current.isAir()) {
                 continue;
             }
 
@@ -128,22 +142,25 @@ public final class SurfaceWorkSavedData extends SavedData {
             changed = true;
         }
 
-        // A dead/stuck worker or another order may leave reservations whose
-        // target was never touched. Once all owner queues are empty, return them.
+        Set<UUID> activeBuilders = new HashSet<>();
         for (UUID owner : owners) {
             ServerPlayer player = level.getServer().getPlayerList().getPlayer(owner);
             if (player == null) {
                 continue;
             }
-            boolean anyQueuedWork = MinionManager.getOwned(player).stream().anyMatch(minion -> minion.queuedWork() > 0);
+
+            List<MinionEntity> minions = MinionManager.getOwned(player);
+            boolean anyQueuedWork = minions.stream().anyMatch(minion -> minion.queuedWork() > 0);
             if (anyQueuedWork) {
                 continue;
             }
 
+            // If an ordinary replacement order lost its worker or was skipped,
+            // settle it now. Fill Air orders remain pending for the build phase.
             Iterator<PendingReplacement> stale = pending.iterator();
             while (stale.hasNext()) {
                 PendingReplacement order = stale.next();
-                if (!owner.equals(order.owner)) {
+                if (!owner.equals(order.owner) || order.original.isAir()) {
                     continue;
                 }
                 if (level.getBlockState(order.pos).isAir()) {
@@ -154,7 +171,79 @@ public final class SurfaceWorkSavedData extends SavedData {
                 stale.remove();
                 changed = true;
             }
+
+            List<PendingReplacement> buildOrders = pending.stream()
+                    .filter(order -> owner.equals(order.owner) && order.original.isAir())
+                    .toList();
+            if (buildOrders.isEmpty()) {
+                continue;
+            }
+
+            List<MinionEntity> builders = minions.stream()
+                    .filter(minion -> minion.queuedWork() == 0 && minion.getInventory().isEmpty())
+                    .toList();
+            int assignments = Math.min(buildOrders.size(), builders.size());
+            for (int i = 0; i < assignments; i++) {
+                PendingReplacement order = buildOrders.get(i);
+                MinionEntity minion = builders.get(i);
+                UUID minionId = minion.getUUID();
+                activeBuilders.add(minionId);
+
+                BuilderProgress progress = builderProgress.get(minionId);
+                if (progress == null || !progress.owner.equals(owner) || !progress.pos.equals(order.pos)) {
+                    progress = new BuilderProgress(owner, order.pos, 0);
+                }
+
+                BlockState current = level.getBlockState(order.pos);
+                if (!current.isAir()) {
+                    returnReservedMaterial(level, order);
+                    pending.remove(order);
+                    builderProgress.remove(minionId);
+                    changed = true;
+                    continue;
+                }
+
+                minion.setFollowing(false);
+                minion.clearMoveTarget();
+                minion.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(order.replacement.getBlock()));
+                double distance = minion.distanceToSqr(
+                        order.pos.getX() + 0.5D, order.pos.getY() + 0.5D, order.pos.getZ() + 0.5D);
+
+                if (distance > 9.0D) {
+                    minion.getNavigation().moveTo(
+                            order.pos.getX() + 0.5D, order.pos.getY(), order.pos.getZ() + 0.5D, 1.15D);
+                    builderProgress.put(minionId, new BuilderProgress(owner, order.pos, 0));
+                    continue;
+                }
+
+                minion.getNavigation().stop();
+                minion.getLookControl().setLookAt(
+                        order.pos.getX() + 0.5D, order.pos.getY() + 0.5D, order.pos.getZ() + 0.5D);
+                int ticks = progress.ticks + 1;
+                if (ticks == 1 || ticks % 4 == 0) {
+                    minion.swing(InteractionHand.MAIN_HAND);
+                }
+
+                int requiredTicks = Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
+                if (ticks < requiredTicks) {
+                    builderProgress.put(minionId, new BuilderProgress(owner, order.pos, ticks));
+                    continue;
+                }
+
+                BlockState desired = copyCompatibleProperties(order.original, order.replacement);
+                if (desired.canSurvive(level, order.pos)) {
+                    placeReservedReplacement(level, order);
+                } else {
+                    returnReservedMaterial(level, order);
+                }
+                pending.remove(order);
+                builderProgress.remove(minionId);
+                minion.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+                changed = true;
+            }
         }
+
+        builderProgress.keySet().removeIf(minionId -> !activeBuilders.contains(minionId));
 
         if (changed) {
             setDirty();
@@ -162,10 +251,10 @@ public final class SurfaceWorkSavedData extends SavedData {
     }
 
     /**
-     * Finishes and removes every pending order for one owner. Air means the
-     * Minion already performed the destructive half and therefore must receive
-     * the replacement. A still-occupied target was untouched, so its reserved
-     * material can simply be refunded.
+     * Finishes and removes every pending order for one owner. For replacements,
+     * air means the Minion already performed the destructive half and therefore
+     * receives the reserved replacement. Fill Air entries never appear on cancel;
+     * their still-reserved block is returned instead.
      */
     private boolean finishOwner(ServerLevel level, UUID owner) {
         boolean changed = false;
@@ -176,7 +265,9 @@ public final class SurfaceWorkSavedData extends SavedData {
                 continue;
             }
 
-            if (level.getBlockState(order.pos).isAir()) {
+            if (order.original.isAir()) {
+                returnReservedMaterial(level, order);
+            } else if (level.getBlockState(order.pos).isAir()) {
                 placeReservedReplacement(level, order);
             } else {
                 returnReservedMaterial(level, order);
@@ -184,6 +275,7 @@ public final class SurfaceWorkSavedData extends SavedData {
             iterator.remove();
             changed = true;
         }
+        builderProgress.entrySet().removeIf(entry -> owner.equals(entry.getValue().owner));
         return changed;
     }
 
@@ -331,6 +423,12 @@ public final class SurfaceWorkSavedData extends SavedData {
         public PendingReplacement {
             pos = pos.immutable();
             materialChest = materialChest.immutable();
+        }
+    }
+
+    private record BuilderProgress(UUID owner, BlockPos pos, int ticks) {
+        private BuilderProgress {
+            pos = pos.immutable();
         }
     }
 }

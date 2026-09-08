@@ -19,6 +19,7 @@ public final class SurfaceWorkSettings {
         public int patchSize = 3;
         public int patchStrength = 75;
         public boolean surfaceOnly = true;
+        public boolean fillAir = false;
         public TargetMode targetMode = TargetMode.SMART;
 
         public void reset() {
@@ -26,6 +27,7 @@ public final class SurfaceWorkSettings {
             patchSize = 3;
             patchStrength = 75;
             surfaceOnly = true;
+            fillAir = false;
             targetMode = TargetMode.SMART;
         }
     }

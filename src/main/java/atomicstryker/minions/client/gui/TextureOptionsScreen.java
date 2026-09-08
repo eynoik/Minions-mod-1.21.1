@@ -20,8 +20,8 @@ public final class TextureOptionsScreen extends Screen {
     @Override
     protected void init() {
         int center = width / 2;
-        int y = Math.max(52, height / 4 - 8);
-        int row = 30;
+        int y = Math.max(46, height / 4 - 14);
+        int row = 28;
 
         addValueRow(center, y,
                 () -> Component.translatable("screen.minions.options.coverage", options.coverage),
@@ -41,17 +41,22 @@ public final class TextureOptionsScreen extends Screen {
                     b.setMessage(surfaceLabel());
                 }).bounds(center - 130, y + row * 3, 260, 20).build());
 
+        addRenderableWidget(Button.builder(fillAirLabel(), b -> {
+                    options.fillAir = !options.fillAir;
+                    b.setMessage(fillAirLabel());
+                }).bounds(center - 130, y + row * 4, 260, 20).build());
+
         addRenderableWidget(Button.builder(targetLabel(), b -> {
                     options.targetMode = options.targetMode.next();
                     b.setMessage(targetLabel());
-                }).bounds(center - 130, y + row * 4, 260, 20).build());
+                }).bounds(center - 130, y + row * 5, 260, 20).build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.options.reset"), b -> {
                     options.reset();
                     minecraft.setScreen(new TextureOptionsScreen(parent));
-                }).bounds(center - 130, y + row * 5, 125, 20).build());
+                }).bounds(center - 130, y + row * 6, 125, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.options.done"), b -> minecraft.setScreen(parent))
-                .bounds(center + 5, y + row * 5, 125, 20).build());
+                .bounds(center + 5, y + row * 6, 125, 20).build());
     }
 
     private void addValueRow(int center, int y, Supplier<Component> label, Runnable minus, Runnable plus) {
@@ -75,6 +80,11 @@ public final class TextureOptionsScreen extends Screen {
                 Component.translatable(options.surfaceOnly ? "screen.minions.options.on" : "screen.minions.options.off"));
     }
 
+    private Component fillAirLabel() {
+        return Component.translatable("screen.minions.options.fill_air",
+                Component.translatable(options.fillAir ? "screen.minions.options.on" : "screen.minions.options.off"));
+    }
+
     private Component targetLabel() {
         return Component.translatable("screen.minions.options.target_mode", targetModeName(options.targetMode));
     }
@@ -91,12 +101,14 @@ public final class TextureOptionsScreen extends Screen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);
         super.render(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(font, title, width / 2, 28, 0xFFFFFF);
+        graphics.drawCenteredString(font, title, width / 2, 24, 0xFFFFFF);
 
-        int y = Math.max(52, height / 4 - 8);
-        int row = 30;
+        int y = Math.max(46, height / 4 - 14);
+        int row = 28;
         graphics.drawCenteredString(font, Component.translatable("screen.minions.texture_options.help"),
-                width / 2, y + row * 6 + 5, 0xAAAAAA);
+                width / 2, y + row * 7 + 4, 0xAAAAAA);
+        graphics.drawCenteredString(font, Component.translatable("screen.minions.texture_options.fill_help"),
+                width / 2, y + row * 7 + 16, 0xAAAAAA);
     }
 
     private static int clamp(int value, int min, int max) {

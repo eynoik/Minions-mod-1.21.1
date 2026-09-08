@@ -50,6 +50,7 @@ public final class SurfaceWorkJob {
         if (sizeX > MAX_SPAN || sizeY > MAX_SPAN || sizeZ > MAX_SPAN || volume > MAX_VOLUME) {
             return Result.TOO_LARGE;
         }
+        boolean thinSelection = sizeX == 1L || sizeY == 1L || sizeZ == 1L;
 
         ServerLevel level = player.serverLevel();
         BlockEntity chestEntity = level.getBlockEntity(materialChest);
@@ -125,7 +126,9 @@ public final class SurfaceWorkJob {
             boolean targeted = switch (targetMode) {
                 case 1 -> paletteBlocks.contains(currentBlock); // palette only
                 case 2 -> true; // all structural/eligible blocks
-                default -> currentBlock == dominant || paletteBlocks.contains(currentBlock); // smart
+                // A one-block-thick selection is already an explicit surface chosen by the player.
+                // In that case Smart must not punch gaps through dirt/grass/other surface variants.
+                default -> thinSelection || currentBlock == dominant || paletteBlocks.contains(currentBlock);
             };
             if (!targeted) {
                 continue;
@@ -180,7 +183,9 @@ public final class SurfaceWorkJob {
             minion.clearMoveTarget();
         }
 
-        SurfaceWorkSavedData.replaceJob(level, player.getUUID(), replacements);
+        if (!SurfaceWorkSavedData.replaceJob(level, player.getUUID(), replacements)) {
+            return Result.MATERIALS_CHANGED;
+        }
         for (QueuedReplacement order : queue) {
             order.worker.enqueueWork(order.pos, 0);
         }
@@ -228,8 +233,11 @@ public final class SurfaceWorkJob {
 
     private static boolean isExposed(ServerLevel level, BlockPos pos) {
         for (Direction direction : Direction.values()) {
-            BlockState neighbour = level.getBlockState(pos.relative(direction));
-            if (neighbour.isAir() || !neighbour.getFluidState().isEmpty()) {
+            BlockPos neighbourPos = pos.relative(direction);
+            BlockState neighbour = level.getBlockState(neighbourPos);
+            if (neighbour.isAir()
+                    || !neighbour.getFluidState().isEmpty()
+                    || neighbour.getCollisionShape(level, neighbourPos).isEmpty()) {
                 return true;
             }
         }
@@ -336,7 +344,8 @@ public final class SurfaceWorkJob {
         INVALID_CHEST,
         EMPTY_PALETTE,
         NO_MINIONS,
-        NO_TARGETS
+        NO_TARGETS,
+        MATERIALS_CHANGED
     }
 
     private record Candidate(BlockPos pos, BlockState state) {

@@ -85,10 +85,11 @@ public final class SurfaceWorkJob {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = level.getBlockState(pos);
 
+                    // Fill Air means exactly that: every air cell inside the selected
+                    // cuboid is a build candidate. Surface Only filters only existing
+                    // blocks and never suppresses an explicitly requested air fill.
                     if (fillAir && state.isAir()) {
-                        if (!surfaceOnly || isFillAirSurface(level, pos)) {
-                            candidates.add(new Candidate(pos, state));
-                        }
+                        candidates.add(new Candidate(pos, state));
                         continue;
                     }
 
@@ -132,10 +133,8 @@ public final class SurfaceWorkJob {
             Block currentBlock = candidate.state.getBlock();
             boolean buildingIntoAir = candidate.state.isAir();
             boolean targeted = buildingIntoAir || switch (targetMode) {
-                case 1 -> paletteBlocks.contains(currentBlock); // palette only
-                case 2 -> true; // all structural/eligible blocks
-                // A one-block-thick selection is already an explicit surface chosen by the player.
-                // In that case Smart must not punch gaps through dirt/grass/other surface variants.
+                case 1 -> paletteBlocks.contains(currentBlock);
+                case 2 -> true;
                 default -> thinSelection || currentBlock == dominant || paletteBlocks.contains(currentBlock);
             };
             if (!targeted) {
@@ -165,8 +164,6 @@ public final class SurfaceWorkJob {
             PaletteEntry selected = palette.get(selectedIndex);
             BlockState desired = selected.block.defaultBlockState();
             if (!buildingIntoAir && selected.block == currentBlock) {
-                // The chest ratio can deliberately allocate the existing/base material.
-                // That is a no-op and consumes no item, exactly like leaving this patch clean.
                 continue;
             }
 
@@ -252,22 +249,6 @@ public final class SurfaceWorkJob {
             if (neighbour.isAir()
                     || !neighbour.getFluidState().isEmpty()
                     || neighbour.getCollisionShape(level, neighbourPos).isEmpty()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * With Surface Only enabled, Fill Air repairs/builds only cells touching an
-     * actual structural surface. Turning Surface Only off intentionally allows
-     * the selected cuboid to be filled solid.
-     */
-    private static boolean isFillAirSurface(ServerLevel level, BlockPos pos) {
-        for (Direction direction : Direction.values()) {
-            BlockPos neighbourPos = pos.relative(direction);
-            BlockState neighbour = level.getBlockState(neighbourPos);
-            if (isEligible(level, neighbourPos, neighbour)) {
                 return true;
             }
         }

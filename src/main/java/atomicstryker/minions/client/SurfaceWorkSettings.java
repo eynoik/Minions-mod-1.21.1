@@ -37,6 +37,7 @@ public final class SurfaceWorkSettings {
         public int patchSize = 3;
         public int patchStrength = 80;
         public boolean surfaceOnly = true;
+        public boolean fillAir = false;
         public TargetMode targetMode = TargetMode.SMART;
         public int weatherStrength = 65;
         public int groundBias = 65;
@@ -49,6 +50,7 @@ public final class SurfaceWorkSettings {
             patchSize = 3;
             patchStrength = 80;
             surfaceOnly = true;
+            fillAir = false;
             targetMode = TargetMode.SMART;
             weatherStrength = 65;
             groundBias = 65;

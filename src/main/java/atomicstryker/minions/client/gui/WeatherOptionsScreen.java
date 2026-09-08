@@ -6,6 +6,8 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
+import java.util.function.Supplier;
+
 public final class WeatherOptionsScreen extends Screen {
     private final Screen parent;
     private final SurfaceWorkSettings.WeatherOptions options = SurfaceWorkSettings.weather();
@@ -22,29 +24,37 @@ public final class WeatherOptionsScreen extends Screen {
         int leftCenter = width / 2 - 155;
         int rightCenter = width / 2 + 155;
 
-        addPair(leftCenter, y,
+        addValueRow(leftCenter, y,
+                () -> Component.translatable("screen.minions.options.coverage", options.coverage),
                 () -> options.coverage = clamp(options.coverage - 5, 5, 100),
                 () -> options.coverage = clamp(options.coverage + 5, 5, 100));
-        addPair(leftCenter, y + row,
+        addValueRow(leftCenter, y + row,
+                () -> Component.translatable("screen.minions.options.patch_size", options.patchSize),
                 () -> options.patchSize = clamp(options.patchSize - 1, 1, 8),
                 () -> options.patchSize = clamp(options.patchSize + 1, 1, 8));
-        addPair(leftCenter, y + row * 2,
+        addValueRow(leftCenter, y + row * 2,
+                () -> Component.translatable("screen.minions.options.patch_strength", options.patchStrength),
                 () -> options.patchStrength = clamp(options.patchStrength - 5, 0, 100),
                 () -> options.patchStrength = clamp(options.patchStrength + 5, 0, 100));
-        addPair(leftCenter, y + row * 3,
+        addValueRow(leftCenter, y + row * 3,
+                () -> Component.translatable("screen.minions.options.weather_strength", options.weatherStrength),
                 () -> options.weatherStrength = clamp(options.weatherStrength - 5, 0, 100),
                 () -> options.weatherStrength = clamp(options.weatherStrength + 5, 0, 100));
 
-        addPair(rightCenter, y,
+        addValueRow(rightCenter, y,
+                () -> Component.translatable("screen.minions.options.ground_bias", options.groundBias),
                 () -> options.groundBias = clamp(options.groundBias - 5, 0, 100),
                 () -> options.groundBias = clamp(options.groundBias + 5, 0, 100));
-        addPair(rightCenter, y + row,
+        addValueRow(rightCenter, y + row,
+                () -> Component.translatable("screen.minions.options.water_bias", options.waterBias),
                 () -> options.waterBias = clamp(options.waterBias - 5, 0, 100),
                 () -> options.waterBias = clamp(options.waterBias + 5, 0, 100));
-        addPair(rightCenter, y + row * 2,
+        addValueRow(rightCenter, y + row * 2,
+                () -> Component.translatable("screen.minions.options.sky_bias", options.skyBias),
                 () -> options.skyBias = clamp(options.skyBias - 5, 0, 100),
                 () -> options.skyBias = clamp(options.skyBias + 5, 0, 100));
-        addPair(rightCenter, y + row * 3,
+        addValueRow(rightCenter, y + row * 3,
+                () -> Component.translatable("screen.minions.options.water_radius", options.waterRadius),
                 () -> options.waterRadius = clamp(options.waterRadius - 1, 1, 6),
                 () -> options.waterRadius = clamp(options.waterRadius + 1, 1, 6));
 
@@ -65,11 +75,20 @@ public final class WeatherOptionsScreen extends Screen {
                 .bounds(width / 2 + 5, y + row * 5, 125, 20).build());
     }
 
-    private void addPair(int center, int y, Runnable minus, Runnable plus) {
-        addRenderableWidget(Button.builder(Component.literal("-"), b -> minus.run())
-                .bounds(center - 130, y, 28, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("+"), b -> plus.run())
-                .bounds(center + 102, y, 28, 20).build());
+    private void addValueRow(int center, int y, Supplier<Component> label, Runnable minus, Runnable plus) {
+        Button value = Button.builder(label.get(), b -> {
+        }).bounds(center - 100, y, 200, 20).build();
+        value.active = false;
+        addRenderableWidget(value);
+
+        addRenderableWidget(Button.builder(Component.literal("-"), b -> {
+                    minus.run();
+                    value.setMessage(label.get());
+                }).bounds(center - 130, y, 28, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+                    plus.run();
+                    value.setMessage(label.get());
+                }).bounds(center + 102, y, 28, 20).build());
     }
 
     private Component surfaceLabel() {
@@ -85,34 +104,13 @@ public final class WeatherOptionsScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);
+        super.render(graphics, mouseX, mouseY, partialTick);
         graphics.drawCenteredString(font, title, width / 2, 28, 0xFFFFFF);
 
         int y = Math.max(52, height / 4 - 14);
         int row = 29;
-        int leftCenter = width / 2 - 155;
-        int rightCenter = width / 2 + 155;
-
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.coverage", options.coverage),
-                leftCenter, y + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.patch_size", options.patchSize),
-                leftCenter, y + row + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.patch_strength", options.patchStrength),
-                leftCenter, y + row * 2 + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.weather_strength", options.weatherStrength),
-                leftCenter, y + row * 3 + 6, 0xFFFFFF);
-
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.ground_bias", options.groundBias),
-                rightCenter, y + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.water_bias", options.waterBias),
-                rightCenter, y + row + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.sky_bias", options.skyBias),
-                rightCenter, y + row * 2 + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.water_radius", options.waterRadius),
-                rightCenter, y + row * 3 + 6, 0xFFFFFF);
-
         graphics.drawCenteredString(font, Component.translatable("screen.minions.weather_options.help"),
                 width / 2, y + row * 6 + 4, 0xAAAAAA);
-        super.render(graphics, mouseX, mouseY, partialTick);
     }
 
     private static int clamp(int value, int min, int max) {

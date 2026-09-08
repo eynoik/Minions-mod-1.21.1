@@ -76,6 +76,7 @@
   "message.minions.surface_invalid_chest": "Ten blok nie jest obsługiwaną skrzynią materiałów.",
   "message.minions.surface_empty_palette": "W skrzyni materiałów nie ma żadnych stawialnych bloków.",
   "message.minions.surface_no_targets": "Przy tej palecie i ustawieniach nie znaleziono bloków do zmiany.",
+  "message.minions.surface_materials_changed": "Zawartość skrzyni materiałów zmieniła się, zanim Miniony zdążyły zarezerwować materiały.",
   "message.minions.texture_started": "Miniony rozpoczęły teksturowanie zaznaczonego obszaru.",
   "message.minions.weather_started": "Miniony rozpoczęły postarzanie zaznaczonego obszaru.",
   "message.minions.deeds_disabled": "Złe uczynki są wyłączone na tym serwerze.",

@@ -34,8 +34,9 @@ public final class SurfaceWorkJob {
 
     public static Result start(ServerPlayer player, Operation operation,
                                BlockPos firstCorner, BlockPos secondCorner, BlockPos materialChest,
-                               int coverage, int patchSize, int patchStrength, boolean surfaceOnly, int targetMode,
-                               int weatherStrength, int groundBias, int waterBias, int skyBias, int waterRadius) {
+                               int coverage, int patchSize, int patchStrength, boolean surfaceOnly, boolean fillAir,
+                               int targetMode, int weatherStrength, int groundBias, int waterBias, int skyBias,
+                               int waterRadius) {
         int minX = Math.min(firstCorner.getX(), secondCorner.getX());
         int minY = Math.min(firstCorner.getY(), secondCorner.getY());
         int minZ = Math.min(firstCorner.getZ(), secondCorner.getZ());
@@ -51,6 +52,7 @@ public final class SurfaceWorkJob {
             return Result.TOO_LARGE;
         }
         boolean thinSelection = sizeX == 1L || sizeY == 1L || sizeZ == 1L;
+        fillAir = operation == Operation.TEXTURE && fillAir;
 
         ServerLevel level = player.serverLevel();
         BlockEntity chestEntity = level.getBlockEntity(materialChest);
@@ -85,6 +87,14 @@ public final class SurfaceWorkJob {
                 for (int x = minX; x <= maxX; x++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = level.getBlockState(pos);
+
+                    if (fillAir && state.isAir()) {
+                        if (!surfaceOnly || isFillAirSurface(level, pos)) {
+                            candidates.add(new Candidate(pos, state));
+                        }
+                        continue;
+                    }
+
                     if (!isEligible(level, pos, state)) {
                         continue;
                     }
@@ -123,7 +133,8 @@ public final class SurfaceWorkJob {
 
         for (Candidate candidate : candidates) {
             Block currentBlock = candidate.state.getBlock();
-            boolean targeted = switch (targetMode) {
+            boolean buildingIntoAir = candidate.state.isAir();
+            boolean targeted = buildingIntoAir || switch (targetMode) {
                 case 1 -> paletteBlocks.contains(currentBlock); // palette only
                 case 2 -> true; // all structural/eligible blocks
                 // A one-block-thick selection is already an explicit surface chosen by the player.
@@ -156,7 +167,7 @@ public final class SurfaceWorkJob {
 
             PaletteEntry selected = palette.get(selectedIndex);
             BlockState desired = selected.block.defaultBlockState();
-            if (selected.block == currentBlock) {
+            if (!buildingIntoAir && selected.block == currentBlock) {
                 // The chest ratio can deliberately allocate the existing/base material.
                 // That is a no-op and consumes no item, exactly like leaving this patch clean.
                 continue;
@@ -170,7 +181,9 @@ public final class SurfaceWorkJob {
 
             replacements.add(new PendingReplacement(
                     player.getUUID(), candidate.pos, materialChest, candidate.state, desired));
-            queue.add(new QueuedReplacement(minions.get(minionIndex++ % minions.size()), candidate.pos));
+            if (!buildingIntoAir) {
+                queue.add(new QueuedReplacement(minions.get(minionIndex++ % minions.size()), candidate.pos));
+            }
         }
 
         if (replacements.isEmpty()) {
@@ -238,6 +251,22 @@ public final class SurfaceWorkJob {
             if (neighbour.isAir()
                     || !neighbour.getFluidState().isEmpty()
                     || neighbour.getCollisionShape(level, neighbourPos).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * With Surface Only enabled, Fill Air repairs/builds only cells touching an
+     * actual structural surface. Turning Surface Only off intentionally allows
+     * the selected cuboid to be filled solid.
+     */
+    private static boolean isFillAirSurface(ServerLevel level, BlockPos pos) {
+        for (Direction direction : Direction.values()) {
+            BlockPos neighbourPos = pos.relative(direction);
+            BlockState neighbour = level.getBlockState(neighbourPos);
+            if (isEligible(level, neighbourPos, neighbour)) {
                 return true;
             }
         }

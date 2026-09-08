@@ -6,6 +6,8 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
+import java.util.function.Supplier;
+
 public final class TextureOptionsScreen extends Screen {
     private final Screen parent;
     private final SurfaceWorkSettings.TextureOptions options = SurfaceWorkSettings.texture();
@@ -21,11 +23,17 @@ public final class TextureOptionsScreen extends Screen {
         int y = Math.max(52, height / 4 - 8);
         int row = 30;
 
-        addPair(center, y, () -> options.coverage = clamp(options.coverage - 5, 5, 100),
+        addValueRow(center, y,
+                () -> Component.translatable("screen.minions.options.coverage", options.coverage),
+                () -> options.coverage = clamp(options.coverage - 5, 5, 100),
                 () -> options.coverage = clamp(options.coverage + 5, 5, 100));
-        addPair(center, y + row, () -> options.patchSize = clamp(options.patchSize - 1, 1, 8),
+        addValueRow(center, y + row,
+                () -> Component.translatable("screen.minions.options.patch_size", options.patchSize),
+                () -> options.patchSize = clamp(options.patchSize - 1, 1, 8),
                 () -> options.patchSize = clamp(options.patchSize + 1, 1, 8));
-        addPair(center, y + row * 2, () -> options.patchStrength = clamp(options.patchStrength - 5, 0, 100),
+        addValueRow(center, y + row * 2,
+                () -> Component.translatable("screen.minions.options.patch_strength", options.patchStrength),
+                () -> options.patchStrength = clamp(options.patchStrength - 5, 0, 100),
                 () -> options.patchStrength = clamp(options.patchStrength + 5, 0, 100));
 
         addRenderableWidget(Button.builder(surfaceLabel(), b -> {
@@ -46,11 +54,20 @@ public final class TextureOptionsScreen extends Screen {
                 .bounds(center + 5, y + row * 5, 125, 20).build());
     }
 
-    private void addPair(int center, int y, Runnable minus, Runnable plus) {
-        addRenderableWidget(Button.builder(Component.literal("-"), b -> minus.run())
-                .bounds(center - 145, y, 28, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("+"), b -> plus.run())
-                .bounds(center + 117, y, 28, 20).build());
+    private void addValueRow(int center, int y, Supplier<Component> label, Runnable minus, Runnable plus) {
+        Button value = Button.builder(label.get(), b -> {
+        }).bounds(center - 110, y, 220, 20).build();
+        value.active = false;
+        addRenderableWidget(value);
+
+        addRenderableWidget(Button.builder(Component.literal("-"), b -> {
+                    minus.run();
+                    value.setMessage(label.get());
+                }).bounds(center - 145, y, 28, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+                    plus.run();
+                    value.setMessage(label.get());
+                }).bounds(center + 117, y, 28, 20).build());
     }
 
     private Component surfaceLabel() {
@@ -73,20 +90,13 @@ public final class TextureOptionsScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);
+        super.render(graphics, mouseX, mouseY, partialTick);
         graphics.drawCenteredString(font, title, width / 2, 28, 0xFFFFFF);
 
         int y = Math.max(52, height / 4 - 8);
         int row = 30;
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.coverage", options.coverage),
-                width / 2, y + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.patch_size", options.patchSize),
-                width / 2, y + row + 6, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.translatable("screen.minions.options.patch_strength", options.patchStrength),
-                width / 2, y + row * 2 + 6, 0xFFFFFF);
-
         graphics.drawCenteredString(font, Component.translatable("screen.minions.texture_options.help"),
                 width / 2, y + row * 6 + 5, 0xAAAAAA);
-        super.render(graphics, mouseX, mouseY, partialTick);
     }
 
     private static int clamp(int value, int min, int max) {

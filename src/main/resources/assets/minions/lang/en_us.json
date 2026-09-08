@@ -56,7 +56,7 @@
   "screen.minions.options.target.palette": "Palette blocks only",
   "screen.minions.options.target.all": "All structural blocks",
   "screen.minions.texture_options.help": "Patch strength controls how strongly nearby blocks share one material zone.",
-  "screen.minions.texture_options.fill_help": "Fill Air builds into empty cells; with Surface Only OFF it can fill the whole selected volume.",
+  "screen.minions.texture_options.fill_help": "Fill Air fills every empty cell in the selection; Surface Only only filters existing blocks.",
   "screen.minions.weather_options.help": "Higher environmental biases push nearby blocks toward later, more weathered chest slots.",
   "message.minions.summon": "A minion answers your call.",
   "message.minions.move": "Minions moving to target.",

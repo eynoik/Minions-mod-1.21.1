@@ -9,12 +9,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.Container;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
@@ -52,15 +50,14 @@ public final class SurfaceWorkJob {
             return Result.TOO_LARGE;
         }
         boolean thinSelection = sizeX == 1L || sizeY == 1L || sizeZ == 1L;
-        fillAir = operation == Operation.TEXTURE && fillAir;
 
         ServerLevel level = player.serverLevel();
-        BlockEntity chestEntity = level.getBlockEntity(materialChest);
-        if (!(chestEntity instanceof Container container)) {
+        List<MaterialChestAccess.Part> materialContainers = MaterialChestAccess.resolve(level, materialChest);
+        if (materialContainers.isEmpty()) {
             return Result.INVALID_CHEST;
         }
 
-        List<PaletteEntry> palette = readPalette(container);
+        List<PaletteEntry> palette = readPalette(materialContainers);
         if (palette.isEmpty()) {
             return Result.EMPTY_PALETTE;
         }
@@ -209,23 +206,27 @@ public final class SurfaceWorkJob {
         return Result.STARTED;
     }
 
-    private static List<PaletteEntry> readPalette(Container container) {
+    private static List<PaletteEntry> readPalette(List<MaterialChestAccess.Part> parts) {
         Map<Block, MutablePaletteEntry> entries = new LinkedHashMap<>();
-        for (int slot = 0; slot < container.getContainerSize(); slot++) {
-            ItemStack stack = container.getItem(slot);
-            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem)) {
-                continue;
+        int logicalSlot = 0;
+        for (MaterialChestAccess.Part part : parts) {
+            var container = part.container();
+            for (int slot = 0; slot < container.getContainerSize(); slot++, logicalSlot++) {
+                ItemStack stack = container.getItem(slot);
+                if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem)) {
+                    continue;
+                }
+                Block block = blockItem.getBlock();
+                if (block.asItem() == Items.AIR) {
+                    continue;
+                }
+                MutablePaletteEntry entry = entries.get(block);
+                if (entry == null) {
+                    entry = new MutablePaletteEntry(block, logicalSlot);
+                    entries.put(block, entry);
+                }
+                entry.count += stack.getCount();
             }
-            Block block = blockItem.getBlock();
-            if (block.asItem() == Items.AIR) {
-                continue;
-            }
-            MutablePaletteEntry entry = entries.get(block);
-            if (entry == null) {
-                entry = new MutablePaletteEntry(block, slot);
-                entries.put(block, entry);
-            }
-            entry.count += stack.getCount();
         }
         List<PaletteEntry> result = new ArrayList<>();
         for (MutablePaletteEntry entry : entries.values()) {

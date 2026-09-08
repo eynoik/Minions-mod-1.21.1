@@ -1,6 +1,7 @@
 package atomicstryker.minions.common.item;
 
 import atomicstryker.minions.common.MinionManager;
+import atomicstryker.minions.common.SurfaceWorkSavedData;
 import atomicstryker.minions.common.entity.MinionEntity;
 import atomicstryker.minions.registry.MinionsSounds;
 import net.minecraft.core.BlockPos;
@@ -78,6 +79,7 @@ public final class MastersStaffItem extends Item {
 
         int usedTicks = getUseDuration(stack, living) - timeLeft;
         if (usedTicks >= HOLD_TICKS) {
+            SurfaceWorkSavedData.cancel(player);
             if (player.isShiftKeyDown()) {
                 MinionManager.unsummon(player);
                 player.displayClientMessage(Component.translatable("message.minions.unsummoned"), true);
@@ -102,7 +104,11 @@ public final class MastersStaffItem extends Item {
         BlockPos clicked = blockHit.getBlockPos();
         BlockEntity blockEntity = level.getBlockEntity(clicked);
         if (blockEntity instanceof Container && MinionManager.hasMinions(player)) {
-            MinionManager.assignReturnContainer(player, clicked, player.isShiftKeyDown());
+            boolean preserveCurrentJob = player.isShiftKeyDown();
+            if (!preserveCurrentJob) {
+                SurfaceWorkSavedData.cancel(player);
+            }
+            MinionManager.assignReturnContainer(player, clicked, preserveCurrentJob);
             player.displayClientMessage(Component.translatable("message.minions.chest"), true);
             return;
         }
@@ -114,12 +120,21 @@ public final class MastersStaffItem extends Item {
         }
 
         if (player.isShiftKeyDown() && MinionManager.hasMinions(player)) {
+            if (SurfaceWorkSavedData.hasJob(player)) {
+                SurfaceWorkSavedData.cancel(player);
+                MinionManager.stopWork(player);
+            }
             if (MinionManager.mineVein(player, clicked)) {
                 player.displayClientMessage(Component.translatable("message.minions.mine"), true);
             }
             return;
         }
 
+        // At the minion cap spawnOrMove becomes a global move order and clears all work.
+        // If there is still room for another minion, existing workers keep their current job.
+        if (MinionManager.hasAllMinions(player)) {
+            SurfaceWorkSavedData.cancel(player);
+        }
         recallDistantMinions(player);
         BlockPos target = clicked.relative(blockHit.getDirection());
         boolean spawned = MinionManager.spawnOrMove(player, target);

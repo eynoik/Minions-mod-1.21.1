@@ -1,9 +1,11 @@
 package atomicstryker.minions.client;
 
+import atomicstryker.minions.network.AreaDigPayload;
 import atomicstryker.minions.network.MinionCommandPayload;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -17,6 +19,7 @@ public final class MinionSelection {
         MINESHAFT,
         STRIP_MINE,
         CUSTOM,
+        DIG_AREA,
         MOVE,
         CHOP_TREE,
         MINE_VEIN,
@@ -25,6 +28,7 @@ public final class MinionSelection {
 
     private static Mode mode = Mode.NONE;
     private static BlockPos target;
+    private static BlockPos firstCorner;
     private static int customSizeXZ = 3;
     private static int customSizeY = 3;
 
@@ -34,6 +38,7 @@ public final class MinionSelection {
     public static void start(Mode newMode) {
         mode = newMode;
         target = null;
+        firstCorner = null;
     }
 
     public static void startCustom(int xzSize, int ySize) {
@@ -45,6 +50,7 @@ public final class MinionSelection {
     public static void clear() {
         mode = Mode.NONE;
         target = null;
+        firstCorner = null;
     }
 
     public static boolean isActive() {
@@ -67,6 +73,10 @@ public final class MinionSelection {
         return target;
     }
 
+    public static BlockPos firstCorner() {
+        return firstCorner;
+    }
+
     public static void updateFromCrosshair() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.hitResult instanceof BlockHitResult blockHit) {
@@ -82,6 +92,20 @@ public final class MinionSelection {
         }
 
         Minecraft minecraft = Minecraft.getInstance();
+        if (mode == Mode.DIG_AREA) {
+            if (firstCorner == null) {
+                firstCorner = target.immutable();
+                if (minecraft.player != null) {
+                    minecraft.player.displayClientMessage(Component.translatable("message.minions.area_first"), true);
+                }
+                return true;
+            }
+
+            PacketDistributor.sendToServer(new AreaDigPayload(firstCorner, target));
+            clear();
+            return true;
+        }
+
         int sneaking = minecraft.player != null && minecraft.player.isShiftKeyDown() ? 1 : 0;
         MinionCommandPayload payload = switch (mode) {
             case MINESHAFT -> new MinionCommandPayload(MinionCommandPayload.Command.DIG_STAIRWELL, target);
@@ -91,7 +115,7 @@ public final class MinionSelection {
             case CHOP_TREE -> new MinionCommandPayload(MinionCommandPayload.Command.CHOP_TREE, target);
             case MINE_VEIN -> new MinionCommandPayload(MinionCommandPayload.Command.MINE_VEIN, target);
             case ASSIGN_CHEST -> new MinionCommandPayload(MinionCommandPayload.Command.ASSIGN_CHEST, target, sneaking, 0);
-            case NONE -> null;
+            case DIG_AREA, NONE -> null;
         };
         if (payload == null) {
             return false;
@@ -115,6 +139,7 @@ public final class MinionSelection {
             );
             case STRIP_MINE -> boxBetween(target, target.relative(direction, 2).above());
             case CUSTOM -> customBox(target, direction, customSizeXZ, customSizeY);
+            case DIG_AREA -> firstCorner == null ? new AABB(target) : boxBetween(firstCorner, target);
             case MOVE, CHOP_TREE, MINE_VEIN, ASSIGN_CHEST -> new AABB(target);
             case NONE -> null;
         };
@@ -122,12 +147,16 @@ public final class MinionSelection {
 
     public static List<AABB> helperBoxes() {
         List<AABB> boxes = new ArrayList<>();
-        if (target == null || mode != Mode.MINESHAFT) {
+        if (target == null) {
             return boxes;
         }
-        for (int i = 1; i <= 3; i++) {
-            BlockPos p = target.offset(i, -i, 0);
-            boxes.add(new AABB(p));
+        if (mode == Mode.MINESHAFT) {
+            for (int i = 1; i <= 3; i++) {
+                BlockPos p = target.offset(i, -i, 0);
+                boxes.add(new AABB(p));
+            }
+        } else if (mode == Mode.DIG_AREA && firstCorner != null) {
+            boxes.add(new AABB(firstCorner).inflate(0.02D));
         }
         return boxes;
     }

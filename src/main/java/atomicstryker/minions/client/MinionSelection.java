@@ -153,7 +153,7 @@ public final class MinionSelection {
                         SurfaceWorkJob.Operation.WEATHERING,
                         firstCorner, target, chest,
                         options.coverage, options.patchSize, options.patchStrength,
-                        options.surfaceOnly, false, options.targetMode.ordinal(),
+                        options.surfaceOnly, options.fillAir, options.targetMode.ordinal(),
                         options.weatherStrength, options.groundBias, options.waterBias,
                         options.skyBias, options.waterRadius
                 ));

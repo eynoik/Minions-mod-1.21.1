@@ -36,6 +36,8 @@ public final class MinionOrdersScreen extends Screen {
                 b -> startSelection(MinionSelection.Mode.ASSIGN_CHEST)).bounds(left, y + row * 4, 200, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.drop"),
                 b -> sendAndClose(MinionCommandPayload.Command.DROP_ITEMS)).bounds(left, y + row * 5, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.surface.open"),
+                b -> minecraft.setScreen(new SurfaceWorkScreen(this))).bounds(left, y + row * 6, 200, 20).build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.stop"),
                 b -> sendAndClose(MinionCommandPayload.Command.STOP_WORK)).bounds(right, y, 200, 20).build());

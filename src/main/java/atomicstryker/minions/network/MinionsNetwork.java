@@ -8,7 +8,7 @@ public final class MinionsNetwork {
     }
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar("3");
+        PayloadRegistrar registrar = event.registrar("4");
         registrar.playToServer(
                 MinionCommandPayload.TYPE,
                 MinionCommandPayload.STREAM_CODEC,
@@ -18,6 +18,11 @@ public final class MinionsNetwork {
                 AreaDigPayload.TYPE,
                 AreaDigPayload.STREAM_CODEC,
                 AreaDigPayload::handle
+        );
+        registrar.playToServer(
+                SurfaceWorkPayload.TYPE,
+                SurfaceWorkPayload.STREAM_CODEC,
+                SurfaceWorkPayload::handle
         );
         registrar.playToServer(
                 EvilDeedPayload.TYPE,

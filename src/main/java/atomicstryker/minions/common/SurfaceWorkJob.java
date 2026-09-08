@@ -202,7 +202,11 @@ public final class SurfaceWorkJob {
             if (block.asItem() == Items.AIR) {
                 continue;
             }
-            MutablePaletteEntry entry = entries.computeIfAbsent(block, ignored -> new MutablePaletteEntry(block, slot));
+            MutablePaletteEntry entry = entries.get(block);
+            if (entry == null) {
+                entry = new MutablePaletteEntry(block, slot);
+                entries.put(block, entry);
+            }
             entry.count += stack.getCount();
         }
         List<PaletteEntry> result = new ArrayList<>();

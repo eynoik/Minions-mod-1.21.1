@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
@@ -39,6 +40,12 @@ public final class SurfaceWorkSavedData extends SavedData {
             SurfaceWorkSavedData::load
     );
 
+    /**
+     * Every pending entry owns exactly one already-reserved replacement block.
+     * The item is removed from the selected palette chest before Minions start
+     * breaking anything. This makes texturing transactional: taking items from
+     * the chest mid-job cannot produce holes or duplicate the original block.
+     */
     private final List<PendingReplacement> pending = new ArrayList<>();
 
     public SurfaceWorkSavedData() {
@@ -48,16 +55,40 @@ public final class SurfaceWorkSavedData extends SavedData {
         return level.getDataStorage().computeIfAbsent(FACTORY, DATA_NAME);
     }
 
-    public static void replaceJob(ServerLevel level, UUID owner, List<PendingReplacement> replacements) {
+    /**
+     * Replaces the owner's previous surface job and reserves all materials for
+     * the new one. The caller must clear the previous Minion work queues first.
+     */
+    public static boolean replaceJob(ServerLevel level, UUID owner, List<PendingReplacement> replacements) {
         SurfaceWorkSavedData data = get(level);
-        data.pending.removeIf(order -> owner.equals(order.owner));
+        data.finishOwner(level, owner);
+
+        List<PendingReplacement> reserved = new ArrayList<>();
+        for (PendingReplacement order : replacements) {
+            if (!consumeMaterial(level, order.materialChest, order.replacement.getBlock())) {
+                // Atomic rollback of the partial reservation.
+                for (PendingReplacement alreadyReserved : reserved) {
+                    returnReservedMaterial(level, alreadyReserved);
+                }
+                data.setDirty();
+                return false;
+            }
+            reserved.add(order);
+        }
+
         data.pending.addAll(replacements);
         data.setDirty();
+        return true;
     }
 
+    /**
+     * Cancelling is safe even if a Minion broke a target on this same tick:
+     * already-air targets receive their reserved replacement, while untouched
+     * targets return their reservation to the palette chest.
+     */
     public static void cancel(ServerPlayer player) {
         SurfaceWorkSavedData data = get(player.serverLevel());
-        if (data.pending.removeIf(order -> player.getUUID().equals(order.owner))) {
+        if (data.finishOwner(player.serverLevel(), player.getUUID())) {
             data.setDirty();
         }
     }
@@ -86,43 +117,41 @@ public final class SurfaceWorkSavedData extends SavedData {
             PendingReplacement order = iterator.next();
             owners.add(order.owner);
 
-            BlockState current = level.getBlockState(order.pos);
-            if (current.is(order.replacement.getBlock())) {
-                iterator.remove();
-                changed = true;
+            // A normal Minion BREAK order creates the air cell. Only then do we
+            // spend the already-reserved material by placing the desired state.
+            if (!level.getBlockState(order.pos).isAir()) {
                 continue;
             }
 
-            if (!current.isAir()) {
-                continue;
-            }
-
-            BlockState desired = copyCompatibleProperties(order.original, order.replacement);
-            boolean canPlace = desired.canSurvive(level, order.pos);
-            if (canPlace && consumeMaterial(level, order.materialChest, desired.getBlock())) {
-                level.setBlock(order.pos, desired, 3);
-                level.playSound(null, order.pos, desired.getSoundType().getPlaceSound(),
-                        net.minecraft.sounds.SoundSource.BLOCKS,
-                        Math.max(0.15F, desired.getSoundType().getVolume() * 0.7F),
-                        desired.getSoundType().getPitch());
-                swingNearestWorker(level, order.owner, order.pos);
-            } else {
-                // Never leave a hole merely because the palette chest changed while the job was running.
-                level.setBlock(order.pos, order.original, 3);
-            }
+            placeReservedReplacement(level, order);
             iterator.remove();
             changed = true;
         }
 
-        // If the player cancelled/replaced the Minion order, discard untouched pending replacements.
-        // Air cells have already been handled above, so this cannot strand a freshly mined hole.
+        // A dead/stuck worker or another order may leave reservations whose
+        // target was never touched. Once all owner queues are empty, return them.
         for (UUID owner : owners) {
             ServerPlayer player = level.getServer().getPlayerList().getPlayer(owner);
             if (player == null) {
                 continue;
             }
             boolean anyQueuedWork = MinionManager.getOwned(player).stream().anyMatch(minion -> minion.queuedWork() > 0);
-            if (!anyQueuedWork && pending.removeIf(order -> owner.equals(order.owner))) {
+            if (anyQueuedWork) {
+                continue;
+            }
+
+            Iterator<PendingReplacement> stale = pending.iterator();
+            while (stale.hasNext()) {
+                PendingReplacement order = stale.next();
+                if (!owner.equals(order.owner)) {
+                    continue;
+                }
+                if (level.getBlockState(order.pos).isAir()) {
+                    placeReservedReplacement(level, order);
+                } else {
+                    returnReservedMaterial(level, order);
+                }
+                stale.remove();
                 changed = true;
             }
         }
@@ -130,6 +159,32 @@ public final class SurfaceWorkSavedData extends SavedData {
         if (changed) {
             setDirty();
         }
+    }
+
+    /**
+     * Finishes and removes every pending order for one owner. Air means the
+     * Minion already performed the destructive half and therefore must receive
+     * the replacement. A still-occupied target was untouched, so its reserved
+     * material can simply be refunded.
+     */
+    private boolean finishOwner(ServerLevel level, UUID owner) {
+        boolean changed = false;
+        Iterator<PendingReplacement> iterator = pending.iterator();
+        while (iterator.hasNext()) {
+            PendingReplacement order = iterator.next();
+            if (!owner.equals(order.owner)) {
+                continue;
+            }
+
+            if (level.getBlockState(order.pos).isAir()) {
+                placeReservedReplacement(level, order);
+            } else {
+                returnReservedMaterial(level, order);
+            }
+            iterator.remove();
+            changed = true;
+        }
+        return changed;
     }
 
     private static boolean consumeMaterial(ServerLevel level, BlockPos chestPos, Block block) {
@@ -148,6 +203,54 @@ public final class SurfaceWorkSavedData extends SavedData {
             return true;
         }
         return false;
+    }
+
+    private static void returnReservedMaterial(ServerLevel level, PendingReplacement order) {
+        ItemStack returned = new ItemStack(order.replacement.getBlock());
+        if (returned.isEmpty()) {
+            return;
+        }
+
+        BlockEntity blockEntity = level.getBlockEntity(order.materialChest);
+        if (blockEntity instanceof Container container) {
+            for (int slot = 0; slot < container.getContainerSize() && !returned.isEmpty(); slot++) {
+                ItemStack existing = container.getItem(slot);
+                if (existing.isEmpty()) {
+                    container.setItem(slot, returned.copy());
+                    returned = ItemStack.EMPTY;
+                    break;
+                }
+                if (ItemStack.isSameItemSameComponents(existing, returned)
+                        && existing.getCount() < existing.getMaxStackSize()) {
+                    int moved = Math.min(returned.getCount(), existing.getMaxStackSize() - existing.getCount());
+                    existing.grow(moved);
+                    returned.shrink(moved);
+                    container.setItem(slot, existing);
+                }
+            }
+            container.setChanged();
+        }
+
+        if (!returned.isEmpty()) {
+            ItemEntity overflow = new ItemEntity(
+                    level,
+                    order.materialChest.getX() + 0.5D,
+                    order.materialChest.getY() + 1.0D,
+                    order.materialChest.getZ() + 0.5D,
+                    returned
+            );
+            level.addFreshEntity(overflow);
+        }
+    }
+
+    private static void placeReservedReplacement(ServerLevel level, PendingReplacement order) {
+        BlockState desired = copyCompatibleProperties(order.original, order.replacement);
+        level.setBlock(order.pos, desired, 3);
+        level.playSound(null, order.pos, desired.getSoundType().getPlaceSound(),
+                net.minecraft.sounds.SoundSource.BLOCKS,
+                Math.max(0.15F, desired.getSoundType().getVolume() * 0.7F),
+                desired.getSoundType().getPitch());
+        swingNearestWorker(level, order.owner, order.pos);
     }
 
     private static void swingNearestWorker(ServerLevel level, UUID owner, BlockPos pos) {

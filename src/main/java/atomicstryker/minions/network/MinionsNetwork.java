@@ -8,7 +8,7 @@ public final class MinionsNetwork {
     }
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar registrar = event.registrar("4");
+        PayloadRegistrar registrar = event.registrar("5");
         registrar.playToServer(
                 MinionCommandPayload.TYPE,
                 MinionCommandPayload.STREAM_CODEC,

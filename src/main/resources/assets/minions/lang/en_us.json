@@ -76,6 +76,7 @@
   "message.minions.surface_invalid_chest": "That block is not a usable material chest.",
   "message.minions.surface_empty_palette": "The material chest contains no placeable blocks.",
   "message.minions.surface_no_targets": "No eligible blocks could be changed with this palette and these settings.",
+  "message.minions.surface_materials_changed": "The material chest changed before the Minions could reserve their supplies.",
   "message.minions.texture_started": "Minions started texturing the selected area.",
   "message.minions.weather_started": "Minions started weathering the selected area.",
   "message.minions.deeds_disabled": "Evil deeds are disabled on this server.",

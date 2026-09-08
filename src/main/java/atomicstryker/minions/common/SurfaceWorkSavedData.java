@@ -3,6 +3,7 @@ package atomicstryker.minions.common;
 import atomicstryker.minions.MinionsMod;
 import atomicstryker.minions.common.entity.MinionEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -11,13 +12,9 @@ import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.saveddata.SavedData;
@@ -37,6 +34,8 @@ import java.util.UUID;
 @EventBusSubscriber(modid = MinionsMod.MOD_ID)
 public final class SurfaceWorkSavedData extends SavedData {
     private static final String DATA_NAME = "minions_surface_work";
+    private static final double BUILDER_REACH_SQ = 64.0D; // 8 block build reach for tall walls
+    private static final int BUILDER_TELEPORT_AFTER_TICKS = 100; // five seconds at 20 TPS
     private static final Factory<SurfaceWorkSavedData> FACTORY = new Factory<>(
             SurfaceWorkSavedData::new,
             SurfaceWorkSavedData::load
@@ -68,7 +67,7 @@ public final class SurfaceWorkSavedData extends SavedData {
 
         List<PendingReplacement> reserved = new ArrayList<>();
         for (PendingReplacement order : replacements) {
-            if (!consumeMaterial(level, order.materialChest, order.replacement.getBlock())) {
+            if (!MaterialChestAccess.consumeBlock(level, order.materialChest, order.replacement.getBlock())) {
                 // Atomic rollback of the partial reservation.
                 for (PendingReplacement alreadyReserved : reserved) {
                     returnReservedMaterial(level, alreadyReserved);
@@ -191,7 +190,7 @@ public final class SurfaceWorkSavedData extends SavedData {
 
                 BuilderProgress progress = builderProgress.get(minionId);
                 if (progress == null || !progress.owner.equals(owner) || !progress.pos.equals(order.pos)) {
-                    progress = new BuilderProgress(owner, order.pos, 0);
+                    progress = new BuilderProgress(owner, order.pos, 0, 0, Double.MAX_VALUE);
                 }
 
                 BlockState current = level.getBlockState(order.pos);
@@ -209,24 +208,42 @@ public final class SurfaceWorkSavedData extends SavedData {
                 double distance = minion.distanceToSqr(
                         order.pos.getX() + 0.5D, order.pos.getY() + 0.5D, order.pos.getZ() + 0.5D);
 
-                if (distance > 9.0D) {
-                    minion.getNavigation().moveTo(
+                if (distance > BUILDER_REACH_SQ) {
+                    boolean madeProgress = distance + 0.25D < progress.bestDistanceSq;
+                    double bestDistance = Math.min(progress.bestDistanceSq, distance);
+                    boolean navigating = minion.getNavigation().moveTo(
                             order.pos.getX() + 0.5D, order.pos.getY(), order.pos.getZ() + 0.5D, 1.15D);
-                    builderProgress.put(minionId, new BuilderProgress(owner, order.pos, 0));
+                    int stuckTicks = madeProgress ? 0 : progress.stuckTicks + 1;
+                    if (!navigating) {
+                        stuckTicks = Math.max(stuckTicks, progress.stuckTicks + 1);
+                    }
+
+                    if (stuckTicks >= BUILDER_TELEPORT_AFTER_TICKS) {
+                        BlockPos teleport = findEmergencyBuilderTeleport(level, order.pos);
+                        minion.getNavigation().stop();
+                        minion.teleportTo(teleport.getX() + 0.5D, teleport.getY(), teleport.getZ() + 0.5D);
+                        minion.setDeltaMovement(0.0D, 0.0D, 0.0D);
+                        builderProgress.put(minionId,
+                                new BuilderProgress(owner, order.pos, 0, 0, Double.MAX_VALUE));
+                    } else {
+                        builderProgress.put(minionId,
+                                new BuilderProgress(owner, order.pos, 0, stuckTicks, bestDistance));
+                    }
                     continue;
                 }
 
                 minion.getNavigation().stop();
                 minion.getLookControl().setLookAt(
                         order.pos.getX() + 0.5D, order.pos.getY() + 0.5D, order.pos.getZ() + 0.5D);
-                int ticks = progress.ticks + 1;
+                int ticks = progress.workTicks + 1;
                 if (ticks == 1 || ticks % 4 == 0) {
                     minion.swing(InteractionHand.MAIN_HAND);
                 }
 
                 int requiredTicks = Math.max(4, MinionsConfig.WORK_TICKS_PER_BLOCK.get() / 3);
                 if (ticks < requiredTicks) {
-                    builderProgress.put(minionId, new BuilderProgress(owner, order.pos, ticks));
+                    builderProgress.put(minionId,
+                            new BuilderProgress(owner, order.pos, ticks, 0, distance));
                     continue;
                 }
 
@@ -248,6 +265,26 @@ public final class SurfaceWorkSavedData extends SavedData {
         if (changed) {
             setDirty();
         }
+    }
+
+    private static BlockPos findEmergencyBuilderTeleport(ServerLevel level, BlockPos target) {
+        // Prefer an empty two-block-tall cell next to the work position, but do
+        // not require a floor. This lets builders reach tall/floating walls.
+        for (Direction direction : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
+            BlockPos candidate = target.relative(direction);
+            if (level.getBlockState(candidate).isAir() && level.getBlockState(candidate.above()).isAir()) {
+                return candidate;
+            }
+        }
+        BlockPos above = target.above();
+        if (level.getBlockState(above).isAir()) {
+            return above;
+        }
+
+        // Last-resort recovery is deliberately unrestricted. Minions are immune
+        // to environmental suffocation, and reaching the job is preferable to a
+        // permanent deadlock even if the teleport cell is inside solid blocks.
+        return target;
     }
 
     /**
@@ -279,50 +316,13 @@ public final class SurfaceWorkSavedData extends SavedData {
         return changed;
     }
 
-    private static boolean consumeMaterial(ServerLevel level, BlockPos chestPos, Block block) {
-        BlockEntity blockEntity = level.getBlockEntity(chestPos);
-        if (!(blockEntity instanceof Container container)) {
-            return false;
-        }
-        for (int slot = 0; slot < container.getContainerSize(); slot++) {
-            ItemStack stack = container.getItem(slot);
-            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem) || blockItem.getBlock() != block) {
-                continue;
-            }
-            stack.shrink(1);
-            container.setItem(slot, stack);
-            container.setChanged();
-            return true;
-        }
-        return false;
-    }
-
     private static void returnReservedMaterial(ServerLevel level, PendingReplacement order) {
         ItemStack returned = new ItemStack(order.replacement.getBlock());
         if (returned.isEmpty()) {
             return;
         }
 
-        BlockEntity blockEntity = level.getBlockEntity(order.materialChest);
-        if (blockEntity instanceof Container container) {
-            for (int slot = 0; slot < container.getContainerSize() && !returned.isEmpty(); slot++) {
-                ItemStack existing = container.getItem(slot);
-                if (existing.isEmpty()) {
-                    container.setItem(slot, returned.copy());
-                    returned = ItemStack.EMPTY;
-                    break;
-                }
-                if (ItemStack.isSameItemSameComponents(existing, returned)
-                        && existing.getCount() < existing.getMaxStackSize()) {
-                    int moved = Math.min(returned.getCount(), existing.getMaxStackSize() - existing.getCount());
-                    existing.grow(moved);
-                    returned.shrink(moved);
-                    container.setItem(slot, existing);
-                }
-            }
-            container.setChanged();
-        }
-
+        returned = MaterialChestAccess.insert(level, order.materialChest, returned);
         if (!returned.isEmpty()) {
             ItemEntity overflow = new ItemEntity(
                     level,
@@ -426,7 +426,7 @@ public final class SurfaceWorkSavedData extends SavedData {
         }
     }
 
-    private record BuilderProgress(UUID owner, BlockPos pos, int ticks) {
+    private record BuilderProgress(UUID owner, BlockPos pos, int workTicks, int stuckTicks, double bestDistanceSq) {
         private BuilderProgress {
             pos = pos.immutable();
         }

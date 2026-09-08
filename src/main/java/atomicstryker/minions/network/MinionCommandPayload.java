@@ -2,6 +2,7 @@ package atomicstryker.minions.network;
 
 import atomicstryker.minions.MinionsMod;
 import atomicstryker.minions.common.MinionManager;
+import atomicstryker.minions.common.SurfaceWorkSavedData;
 import atomicstryker.minions.common.entity.MinionEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -40,6 +41,10 @@ public record MinionCommandPayload(Command command, BlockPos target, int arg0, i
             return;
         }
 
+        if (cancelsSurfaceJob(command, arg0)) {
+            SurfaceWorkSavedData.cancel(player);
+        }
+
         switch (command) {
             case FOLLOW -> MinionManager.follow(player);
             case UNSUMMON -> MinionManager.unsummon(player);
@@ -67,6 +72,14 @@ public record MinionCommandPayload(Command command, BlockPos target, int arg0, i
                 }
             }
         }
+    }
+
+    private static boolean cancelsSurfaceJob(Command command, int arg0) {
+        return switch (command) {
+            case DROP_ITEMS -> false;
+            case ASSIGN_CHEST -> arg0 == 0;
+            default -> true;
+        };
     }
 
     @Override

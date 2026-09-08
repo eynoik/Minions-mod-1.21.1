@@ -21,8 +21,8 @@ public final class MinionOrdersScreen extends Screen {
     protected void init() {
         int left = width / 2 - 205;
         int right = width / 2 + 5;
-        int y = Math.max(55, height / 4 - 5);
-        int row = 30;
+        int y = Math.max(40, height / 4 - 20);
+        int row = 27;
 
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.follow"),
                 b -> sendAndClose(MinionCommandPayload.Command.FOLLOW)).bounds(left, y, 200, 20).build());
@@ -47,8 +47,10 @@ public final class MinionOrdersScreen extends Screen {
                 b -> startSelection(MinionSelection.Mode.STRIP_MINE)).bounds(right, y + row * 3, 200, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.customdig_short"),
                 b -> minecraft.setScreen(new CustomDigScreen(this))).bounds(right, y + row * 4, 200, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("screen.minions.digarea"),
+                b -> startSelection(MinionSelection.Mode.DIG_AREA)).bounds(right, y + row * 5, 200, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.nevermind"),
-                b -> minecraft.setScreen(parent)).bounds(right, y + row * 5, 200, 20).build());
+                b -> minecraft.setScreen(parent)).bounds(right, y + row * 6, 200, 20).build());
     }
 
     private void startSelection(MinionSelection.Mode mode) {
@@ -64,7 +66,7 @@ public final class MinionOrdersScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(font, title, width / 2, 32, 0xFFFFFF);
+        graphics.drawCenteredString(font, title, width / 2, 26, 0xFFFFFF);
         super.render(graphics, mouseX, mouseY, partialTick);
     }
 }

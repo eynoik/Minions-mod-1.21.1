@@ -19,8 +19,8 @@ public final class WeatherOptionsScreen extends Screen {
 
     @Override
     protected void init() {
-        int y = Math.max(52, height / 4 - 14);
-        int row = 29;
+        int y = Math.max(46, height / 4 - 18);
+        int row = 28;
         int leftCenter = width / 2 - 155;
         int rightCenter = width / 2 + 155;
 
@@ -62,17 +62,22 @@ public final class WeatherOptionsScreen extends Screen {
                     options.surfaceOnly = !options.surfaceOnly;
                     b.setMessage(surfaceLabel());
                 }).bounds(width / 2 - 285, y + row * 4, 280, 20).build());
+        addRenderableWidget(Button.builder(fillAirLabel(), b -> {
+                    options.fillAir = !options.fillAir;
+                    b.setMessage(fillAirLabel());
+                }).bounds(width / 2 + 5, y + row * 4, 280, 20).build());
+
         addRenderableWidget(Button.builder(targetLabel(), b -> {
                     options.targetMode = options.targetMode.next();
                     b.setMessage(targetLabel());
-                }).bounds(width / 2 + 5, y + row * 4, 280, 20).build());
+                }).bounds(width / 2 - 285, y + row * 5, 570, 20).build());
 
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.options.reset"), b -> {
                     options.reset();
                     minecraft.setScreen(new WeatherOptionsScreen(parent));
-                }).bounds(width / 2 - 130, y + row * 5, 125, 20).build());
+                }).bounds(width / 2 - 130, y + row * 6, 125, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("screen.minions.options.done"), b -> minecraft.setScreen(parent))
-                .bounds(width / 2 + 5, y + row * 5, 125, 20).build());
+                .bounds(width / 2 + 5, y + row * 6, 125, 20).build());
     }
 
     private void addValueRow(int center, int y, Supplier<Component> label, Runnable minus, Runnable plus) {
@@ -96,6 +101,11 @@ public final class WeatherOptionsScreen extends Screen {
                 Component.translatable(options.surfaceOnly ? "screen.minions.options.on" : "screen.minions.options.off"));
     }
 
+    private Component fillAirLabel() {
+        return Component.translatable("screen.minions.options.fill_air",
+                Component.translatable(options.fillAir ? "screen.minions.options.on" : "screen.minions.options.off"));
+    }
+
     private Component targetLabel() {
         return Component.translatable("screen.minions.options.target_mode",
                 TextureOptionsScreen.targetModeName(options.targetMode));
@@ -105,12 +115,14 @@ public final class WeatherOptionsScreen extends Screen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);
         super.render(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(font, title, width / 2, 28, 0xFFFFFF);
+        graphics.drawCenteredString(font, title, width / 2, 24, 0xFFFFFF);
 
-        int y = Math.max(52, height / 4 - 14);
-        int row = 29;
+        int y = Math.max(46, height / 4 - 18);
+        int row = 28;
         graphics.drawCenteredString(font, Component.translatable("screen.minions.weather_options.help"),
-                width / 2, y + row * 6 + 4, 0xAAAAAA);
+                width / 2, y + row * 7 + 4, 0xAAAAAA);
+        graphics.drawCenteredString(font, Component.translatable("screen.minions.texture_options.fill_help"),
+                width / 2, y + row * 7 + 16, 0xAAAAAA);
     }
 
     private static int clamp(int value, int min, int max) {

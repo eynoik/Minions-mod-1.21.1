@@ -3,6 +3,7 @@ package atomicstryker.minions.network;
 import atomicstryker.minions.MinionsMod;
 import atomicstryker.minions.common.AreaDigJob;
 import atomicstryker.minions.common.MinionManager;
+import atomicstryker.minions.common.SurfaceWorkSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -35,6 +36,7 @@ public record AreaDigPayload(BlockPos firstCorner, BlockPos secondCorner) implem
             return;
         }
 
+        SurfaceWorkSavedData.cancel(player);
         AreaDigJob.Result result = AreaDigJob.start(player, firstCorner, secondCorner);
         String message = switch (result) {
             case STARTED -> "message.minions.area_started";
